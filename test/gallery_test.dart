@@ -17,7 +17,11 @@ import 'package:photo_album/widgets/common.dart';
 
 /// In-memory stand-in for the device gallery.
 class FakeGallery implements Gallery {
-  FakeGallery(this.folderAssetsById, {this.gps = const {}});
+  FakeGallery(this.folderAssetsById, {this.gps = const {}, this.addedOrder = false});
+
+  /// List "All photos" folder by folder (like Android's order by date added)
+  /// instead of by capture time.
+  final bool addedOrder;
 
   final Map<String, List<GalleryAsset>> folderAssetsById;
   final Map<String, (double, double)> gps;
@@ -39,7 +43,8 @@ class FakeGallery implements Gallery {
       ];
 
   List<GalleryAsset> get _all {
-    final list = [for (final v in folderAssetsById.values) ...v]..sort((a, b) => b.takenAt.compareTo(a.takenAt));
+    final list = [for (final v in folderAssetsById.values) ...v];
+    if (!addedOrder) list.sort((a, b) => b.takenAt.compareTo(a.takenAt));
     return list;
   }
 
@@ -70,7 +75,8 @@ class FakeGallery implements Gallery {
   Future<void> selectMore() async {}
 }
 
-GalleryAsset asset(String id, DateTime t) => GalleryAsset(id: id, takenAt: t, width: 4000, height: 3000);
+GalleryAsset asset(String id, DateTime t, {String? name}) =>
+    GalleryAsset(id: id, takenAt: t, width: 4000, height: 3000, name: name ?? '$id.jpg');
 
 AlbumRepository repoWith(Gallery gallery) => AlbumRepository(
       MemoryStorage(),
@@ -237,6 +243,51 @@ void main() {
     await tester.tap(find.text('Add 2 photos'));
     await tester.pumpAndSettle();
     expect((result! as PickedPhotos).assets.map((a) => a.id), ['d2a', 'd2b']);
+  });
+
+  testWidgets('picker: each day once, copies in other folders shown once', (tester) async {
+    final g = FakeGallery(addedOrder: true, {
+      'cam': [
+        asset('d2', DateTime(2024, 8, 2, 15)),
+        asset('in', DateTime(2024, 8, 1, 9)),
+        asset('d1', DateTime(2024, 8, 1, 10)),
+      ],
+      // Saved later into another folder: the same photos again, plus a new one.
+      'backup': [
+        asset('d2-copy', DateTime(2024, 8, 2, 15), name: 'd2.jpg'),
+        asset('in-copy', DateTime(2024, 8, 1, 9), name: 'in.jpg'),
+        asset('d2b', DateTime(2024, 8, 2, 16)),
+      ],
+    });
+    final repo = repoWith(g);
+    await tester.runAsync(repo.load);
+    final e = AlbumEvent(id: 'e', title: 'Lisbon', createdAt: DateTime(2024), photos: [
+      Photo(id: 'p', width: 4, height: 3, takenAt: DateTime(2024, 8, 1, 9), palette: const [], assetId: 'in'),
+    ]);
+    await tester.pumpWidget(AlbumScope(
+      repo: repo,
+      child: MaterialApp(
+        home: Builder(
+          builder: (context) => TextButton(onPressed: () => pickFromGallery(context, e, g), child: const Text('open')),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(find.text('Friday, 2 August 2024'), findsOneWidget);
+    expect(find.text('Thursday, 1 August 2024'), findsOneWidget);
+    expect(find.bySemanticsLabel('Already in this album'), findsOneWidget);
+    // d2, d2b, in, d1 - not the two copies.
+    expect(find.byWidgetPredicate((w) => w.runtimeType.toString() == '_Tile'), findsNWidgets(4));
+
+    // Importing a photo together with its copy adds it once.
+    final before = e.photos.length;
+    await tester.runAsync(() => repo.importAssets(e, [
+          asset('d2', DateTime(2024, 8, 2, 15)),
+          asset('d2-copy', DateTime(2024, 8, 2, 15), name: 'd2.jpg'),
+        ]));
+    expect(e.photos.length - before, 1);
+    await tester.pump(const Duration(seconds: 3));
   });
 
   testWidgets('picker: link a whole folder', (tester) async {

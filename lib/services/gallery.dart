@@ -1,16 +1,24 @@
 import 'package:flutter/foundation.dart';
 import 'package:photo_manager/photo_manager.dart' as pm;
+import '../l10n/strings.dart';
 
 /// How much of the device gallery the app may read.
 enum GalleryAccess { full, limited, denied }
 
 /// A photo in the device gallery (metadata only).
 class GalleryAsset {
-  const GalleryAsset({required this.id, required this.takenAt, required this.width, required this.height});
+  const GalleryAsset({required this.id, required this.takenAt, required this.width, required this.height, this.name});
   final String id;
   final DateTime takenAt;
   final int width;
   final int height;
+
+  /// File name, if known.
+  final String? name;
+
+  /// Copies of one photo in different folders share this key (same file
+  /// name, capture second and size). Burst shots differ in their names.
+  String get copyKey => '${name ?? id}|${takenAt.millisecondsSinceEpoch ~/ 1000}|${width}x$height';
 }
 
 /// A gallery folder ("Camera", "WhatsApp Images", a folder you made, …).
@@ -30,8 +38,7 @@ class GalleryFolder {
 /// Only available on Android ([Gallery.create] returns null elsewhere); the
 /// browser keeps copying picked files.
 abstract class Gallery {
-  static Gallery? create() =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android ? PhotoManagerGallery() : null;
+  static Gallery? create() => !kIsWeb && defaultTargetPlatform == TargetPlatform.android ? PhotoManagerGallery() : null;
 
   Future<GalleryAccess> requestAccess();
 
@@ -66,9 +73,8 @@ class PhotoManagerGallery implements Gallery {
   final Map<String, pm.AssetEntity> _entities = {};
   final Map<String, pm.AssetPathEntity> _paths = {};
 
-  pm.FilterOptionGroup get _filter => pm.FilterOptionGroup(
-        orders: const [pm.OrderOption(type: pm.OrderOptionType.createDate, asc: false)],
-      );
+  pm.FilterOptionGroup get _filter =>
+      pm.FilterOptionGroup(orders: const [pm.OrderOption(type: pm.OrderOptionType.createDate, asc: false)]);
 
   @override
   Future<GalleryAccess> requestAccess() async {
@@ -88,7 +94,7 @@ class PhotoManagerGallery implements Gallery {
       _paths[p.id] = p;
       final count = await p.assetCountAsync;
       if (count == 0) continue;
-      out.add(GalleryFolder(id: p.id, name: p.isAll ? 'All photos' : p.name, count: count, isAll: p.isAll));
+      out.add(GalleryFolder(id: p.id, name: p.isAll ? tr('All photos') : p.name, count: count, isAll: p.isAll));
     }
     out.sort((a, b) => a.isAll != b.isAll ? (a.isAll ? -1 : 1) : b.count.compareTo(a.count));
     return out;
@@ -125,7 +131,13 @@ class PhotoManagerGallery implements Gallery {
 
   GalleryAsset _remember(pm.AssetEntity a) {
     _entities[a.id] = a;
-    return GalleryAsset(id: a.id, takenAt: a.createDateTime, width: a.orientatedWidth, height: a.orientatedHeight);
+    return GalleryAsset(
+      id: a.id,
+      takenAt: a.createDateTime,
+      width: a.orientatedWidth,
+      height: a.orientatedHeight,
+      name: a.title,
+    );
   }
 
   Future<pm.AssetEntity?> _entity(String id) async {

@@ -20,6 +20,17 @@ class AlbumItem {
   }
 
   double get aspect => cover.aspect;
+
+  /// Room in the collage: the largest size chosen for any of its photos,
+  /// otherwise large for carousels and normal for single photos.
+  PhotoSize get size {
+    PhotoSize? chosen;
+    for (final p in photos) {
+      final s = p.size;
+      if (s != null && (chosen == null || s.index > chosen.index)) chosen = s;
+    }
+    return chosen ?? (isStack ? PhotoSize.large : PhotoSize.normal);
+  }
   Iterable<String> get ids => photos.map((p) => p.id);
 }
 

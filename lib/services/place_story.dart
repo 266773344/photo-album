@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../l10n/strings.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
@@ -52,7 +54,7 @@ Rules:
     DateTime? visitedOn,
     String? albumTitle,
   }) async {
-    if (!settings.canWriteStories) throw StoryException('Add your Anthropic API key in Settings first.');
+    if (!settings.canWriteStories) throw StoryException(tr('Add your Anthropic API key in Settings first.'));
     final model = settings.model;
     final prompt = [
       'Place: ${place.name}',
@@ -60,9 +62,10 @@ Rules:
       'Coordinates: ${place.lat.toStringAsFixed(5)}, ${place.lng.toStringAsFixed(5)}',
       if (momentTitle != null && momentTitle.isNotEmpty) 'The traveller titled this moment: "$momentTitle"',
       if (albumTitle != null && albumTitle.isNotEmpty) 'Album: "$albumTitle"',
-      if (visitedOn != null) 'Visited on: ${DateFormat('d MMMM y').format(visitedOn)}',
+      if (visitedOn != null) 'Visited on: ${DateFormat('d MMMM y', 'en_US').format(visitedOn)}',
       '',
-      'Write the flavour text in English.',
+      // The app's language decides the description's language.
+      L10n.german ? 'Write the flavour text in German.' : 'Write the flavour text in English.',
     ].join('\n');
 
     // Haiku uses the basic web search tool; the newer variant with dynamic
@@ -95,11 +98,11 @@ Rules:
         messages.add({'role': 'assistant', 'content': response['content']});
         continue;
       }
-      if (stop == 'refusal') throw StoryException('Claude declined to write about this place.');
+      if (stop == 'refusal') throw StoryException(tr('Claude declined to write about this place.'));
       break;
     }
     final story = parseStoryResponse(response);
-    if (story.text.isEmpty) throw StoryException('No description came back. Try again later.');
+    if (story.text.isEmpty) throw StoryException(tr('No description came back. Try again later.'));
     return story;
   }
 
@@ -121,17 +124,17 @@ Rules:
           )
           .timeout(const Duration(minutes: 2));
     } catch (e) {
-      throw StoryException('Could not reach the Claude API. Check your connection.');
+      throw StoryException(tr('Could not reach the Claude API. Check your connection.'));
     }
     final json = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     if (res.statusCode == 200) return json;
     final apiMessage = (json['error'] as Map?)?['message'] as String?;
     throw StoryException(switch (res.statusCode) {
-      401 => 'The API key was rejected. Check it in Settings.',
-      403 => 'This API key is not allowed to use this model or web search.',
-      429 => 'Rate limit reached. Try again in a minute.',
-      529 || 503 => 'Claude is busy right now. Try again shortly.',
-      _ => apiMessage ?? 'Claude API error ${res.statusCode}.',
+      401 => tr('The API key was rejected. Check it in Settings.'),
+      403 => tr('This API key is not allowed to use this model or web search.'),
+      429 => tr('Rate limit reached. Try again in a minute.'),
+      529 || 503 => tr('Claude is busy right now. Try again shortly.'),
+      _ => apiMessage ?? tr('Claude API error {code}.', {'code': res.statusCode}),
     });
   }
 }

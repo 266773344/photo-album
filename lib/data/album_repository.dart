@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import '../l10n/strings.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
@@ -60,13 +61,28 @@ class AlbumRepository extends ChangeNotifier {
   Future<void> updateSettings(AppSettings s) async {
     final routesTurnedOn = s.realRoutes && s.onlineLookups && !(settings.realRoutes && settings.onlineLookups);
     settings = s;
+    final languageChanged = _applyLanguage();
     notifyListeners();
     await _save();
+    if (languageChanged) {
+      // Day and album place names in the new language.
+      for (final e in [..._events]) {
+        unawaited(refreshDayPlaces(e));
+      }
+    }
     if (routesTurnedOn) {
       for (final e in [..._events]) {
         unawaited(refreshRoutes(e));
       }
     }
+  }
+
+  /// Switches the app and place-name language to the setting; returns
+  /// whether it changed.
+  bool _applyLanguage() {
+    final changed = L10n.apply(settings.language);
+    geocoder.language = L10n.code;
+    return changed;
   }
 
   /// Import progress per event id: (done, total).
@@ -90,6 +106,7 @@ class AlbumRepository extends ChangeNotifier {
       _events.addAll((decoded['events'] as List).map((e) => AlbumEvent.fromJson(e as Map<String, dynamic>)));
       if (decoded['settings'] != null) settings = AppSettings.fromJson(decoded['settings'] as Map<String, dynamic>);
     }
+    _applyLanguage();
     loaded = true;
     notifyListeners();
     unawaited(() async {
@@ -109,6 +126,12 @@ class AlbumRepository extends ChangeNotifier {
   Future<void> refreshDayPlaces(AlbumEvent e) async {
     if (!settings.onlineLookups) return;
     var changedAny = false;
+    // Place names follow the app language: look them up again after a switch.
+    if (e.placesLanguage != geocoder.language) {
+      if (e.dayPlaces.isNotEmpty) changedAny = true;
+      e.dayPlaces.clear();
+      e.placesLanguage = geocoder.language;
+    }
     for (final day in groupByDay(e.photos)) {
       if (e.dayPlaces.containsKey(day.key)) continue;
       final located = day.photos.where((p) => p.hasLocation).toList();
@@ -375,7 +398,9 @@ class AlbumRepository extends ChangeNotifier {
     final g = gallery;
     if (g == null) throw StateError('No device gallery on this platform');
     final have = {for (final p in e.photos) p.assetId};
-    final todo = assets.where((a) => !have.contains(a.id)).toList();
+    // The same photo can sit in several folders: import one copy.
+    final keys = <String>{};
+    final todo = assets.where((a) => !have.contains(a.id) && keys.add(a.copyKey)).toList();
     // Picking a photo by hand again overrides an earlier removal.
     if (folderId == null) e.excludedAssets.removeAll(todo.map((a) => a.id));
     return _importEach(e, todo.length, (i) async {
@@ -569,9 +594,9 @@ class FolderSyncResult {
 
   @override
   String toString() => [
-        if (added > 0) '+$added new',
-        if (removed > 0) '$removed removed',
-        if (failed > 0) '$failed could not be read',
+        if (added > 0) tr('+{n} new', {'n': added}),
+        if (removed > 0) tr('{n} removed', {'n': removed}),
+        if (failed > 0) tr('{n} could not be read', {'n': failed}),
       ].join(', ');
 }
 
@@ -586,8 +611,4 @@ List<String> autoLocationTowns(AlbumEvent e) {
 }
 
 /// "A", "A & B", "A, B & C".
-String joinPlaceNames(List<String> names) => switch (names.length) {
-      0 => '',
-      1 => names.single,
-      _ => '${names.sublist(0, names.length - 1).join(', ')} & ${names.last}',
-    };
+String joinPlaceNames(List<String> names) => joinNames(names);

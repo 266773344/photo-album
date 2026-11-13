@@ -1,6 +1,8 @@
 import 'package:intl/intl.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../l10n/strings.dart';
+
 import '../models/models.dart';
 import '../services/gallery.dart';
 import '../theme/event_theme.dart';
@@ -25,13 +27,15 @@ class PickedFolder extends GalleryPick {
 
 /// Opens the in-app gallery picker for adding photos to [event].
 Future<GalleryPick?> pickFromGallery(BuildContext context, AlbumEvent event, Gallery gallery) {
-  return Navigator.of(context).push<GalleryPick>(MaterialPageRoute(
-    fullscreenDialog: true,
-    builder: (_) => Theme(
-      data: EventStyle.of(event).themeData,
-      child: GalleryPickerScreen(event: event, gallery: gallery),
+  return Navigator.of(context).push<GalleryPick>(
+    MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) => Theme(
+        data: EventStyle.of(event).themeData,
+        child: GalleryPickerScreen(event: event, gallery: gallery),
+      ),
     ),
-  ));
+  );
 }
 
 class GalleryPickerScreen extends StatefulWidget {
@@ -94,9 +98,10 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen> {
     setState(() {
       _folder = f;
       _assets.clear();
+      _unique = null;
       _loading = true;
     });
-    for (var start = 0;; start += _chunk) {
+    for (var start = 0; ; start += _chunk) {
       final chunk = await _g.assets(f.id, start: start, end: start + _chunk);
       if (!mounted || gen != _generation) return;
       setState(() => _assets.addAll(chunk));
@@ -105,21 +110,45 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen> {
     if (mounted && gen == _generation) setState(() => _loading = false);
   }
 
+  /// Ids of further copies (same photo in other folders) per shown photo.
+  final Map<String, List<String>> _copies = {};
+  List<GalleryAsset>? _unique;
+  int _uniqueFrom = -1;
+
+  /// The folder's photos newest first by capture time, each photo once.
+  /// (The gallery lists them by when they were *added*, so a copy saved
+  /// later - shared, edited, backed up - would turn up far from its day.)
+  List<GalleryAsset> get _sorted {
+    if (_unique != null && _uniqueFrom == _assets.length) return _unique!;
+    _copies.clear();
+    final first = <String, GalleryAsset>{};
+    for (final a in _assets) {
+      final kept = first.putIfAbsent(a.copyKey, () => a);
+      if (!identical(kept, a)) (_copies[kept.id] ??= []).add(a.id);
+    }
+    _uniqueFrom = _assets.length;
+    return _unique = first.values.toList()..sort((a, b) => b.takenAt.compareTo(a.takenAt));
+  }
+
   List<GalleryAsset> get _visible {
     final range = _albumRange;
-    if (!_onlyAlbumDates || range == null) return _assets;
+    final all = _sorted;
+    if (!_onlyAlbumDates || range == null) return all;
     return [
-      for (final a in _assets)
+      for (final a in all)
         if (!a.takenAt.isBefore(range.$1) && a.takenAt.isBefore(range.$2)) a,
     ];
   }
 
+  /// Whether this photo, or a copy of it, is already in the album.
+  bool _isInAlbum(GalleryAsset a) => _inAlbum.contains(a.id) || (_copies[a.id]?.any(_inAlbum.contains) ?? false);
+
   void _toggle(GalleryAsset a) => setState(() {
-        if (_selected.remove(a.id) == null) _selected[a.id] = a;
-      });
+    if (_selected.remove(a.id) == null) _selected[a.id] = a;
+  });
 
   void _toggleDay(List<GalleryAsset> day) {
-    final pickable = day.where((a) => !_inAlbum.contains(a.id)).toList();
+    final pickable = day.where((a) => !_isInAlbum(a)).toList();
     final all = pickable.every((a) => _selected.containsKey(a.id));
     setState(() {
       for (final a in pickable) {
@@ -158,13 +187,15 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-              child: Text('Add a whole folder', style: Theme.of(context).textTheme.titleLarge),
+              child: Text(tr('Add a whole folder'), style: Theme.of(context).textTheme.titleLarge),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
               child: Text(
-                'The album stays in sync: photos you add to the folder later appear in the album, '
-                'photos you delete from it disappear.',
+                tr(
+                  'The album stays in sync: photos you add to the folder later appear in the album, '
+                  'photos you delete from it disappear.',
+                ),
                 style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             ),
@@ -172,7 +203,9 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen> {
               ListTile(
                 leading: Icon(linked.contains(f.id) ? Icons.folder_special : Icons.folder_outlined),
                 title: Text(f.name),
-                subtitle: Text(linked.contains(f.id) ? 'Already linked · ${_count(f.count)}' : _count(f.count)),
+                subtitle: Text(
+                  linked.contains(f.id) ? '${tr('Already linked')} · ${_count(f.count)}' : _count(f.count),
+                ),
                 enabled: !linked.contains(f.id),
                 onTap: () => Navigator.pop(context, f),
               ),
@@ -183,15 +216,19 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen> {
     if (folder == null || !mounted) return;
     final ok = await confirmDialog(
       context,
-      title: 'Add “${folder.name}”?',
-      message: 'All ${_count(folder.count)} will be added, and the album will keep following the folder.'
-          '${folder.count > 500 ? '\n\nThat\'s a lot of photos. Importing them takes a while and the album may get long.' : ''}',
-      action: 'Add folder',
+      title: tr('Add “{name}”?', {'name': folder.name}),
+      message: [
+        tr('All {photos} will be added, and the album will keep following the folder.', {
+          'photos': _count(folder.count),
+        }),
+        if (folder.count > 500) tr('That\'s a lot of photos. Importing them takes a while and the album may get long.'),
+      ].join('\n\n'),
+      action: tr('Add folder'),
     );
     if (ok && mounted) Navigator.pop(context, PickedFolder(folder));
   }
 
-  static String _count(int n) => '$n photo${n == 1 ? '' : 's'}';
+  static String _count(int n) => trn('{n} photo', '{n} photos', n);
 
   @override
   Widget build(BuildContext context) {
@@ -200,14 +237,17 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen> {
       backgroundColor: s.surface,
       appBar: AppBar(
         title: _folders.isEmpty
-            ? const Text('Add photos')
+            ? Text(tr('Add photos'))
             : DropdownButtonHideUnderline(
                 child: DropdownButton<GalleryFolder>(
                   value: _folder,
                   isExpanded: true,
                   items: [
                     for (final f in _folders)
-                      DropdownMenuItem(value: f, child: Text('${f.name} (${f.count})', overflow: TextOverflow.ellipsis)),
+                      DropdownMenuItem(
+                        value: f,
+                        child: Text('${f.name} (${f.count})', overflow: TextOverflow.ellipsis),
+                      ),
                   ],
                   onChanged: (f) {
                     if (f != null && f != _folder) _open(f);
@@ -217,7 +257,7 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen> {
         actions: [
           if (_folders.any((f) => !f.isAll))
             IconButton(
-              tooltip: 'Add a whole folder',
+              tooltip: tr('Add a whole folder'),
               icon: const Icon(Icons.create_new_folder_outlined),
               onPressed: _pickFolder,
             ),
@@ -227,20 +267,23 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen> {
         null => const Center(child: CircularProgressIndicator()),
         GalleryAccess.denied => _NoAccess(onSettings: _g.openSettings, onRetry: _retryAccess),
         _ => Column(
-            children: [
-              if (_access == GalleryAccess.limited)
-                Material(
-                  color: s.secondaryContainer,
-                  child: ListTile(
-                    leading: Icon(Icons.info_outline, color: s.onSecondaryContainer),
-                    title: Text('Only photos you selected are visible', style: TextStyle(color: s.onSecondaryContainer)),
-                    trailing: TextButton(onPressed: _selectMore, child: const Text('Select more')),
+          children: [
+            if (_access == GalleryAccess.limited)
+              Material(
+                color: s.secondaryContainer,
+                child: ListTile(
+                  leading: Icon(Icons.info_outline, color: s.onSecondaryContainer),
+                  title: Text(
+                    tr('Only photos you selected are visible'),
+                    style: TextStyle(color: s.onSecondaryContainer),
                   ),
+                  trailing: TextButton(onPressed: _selectMore, child: Text(tr('Select more'))),
                 ),
-              if (_albumRange != null) _dateChip(context),
-              Expanded(child: _grid(context)),
-            ],
-          ),
+              ),
+            if (_albumRange != null) _dateChip(context),
+            Expanded(child: _grid(context)),
+          ],
+        ),
       },
       bottomNavigationBar: _selected.isEmpty
           ? null
@@ -252,11 +295,11 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen> {
                   padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
                   child: Row(
                     children: [
-                      TextButton(onPressed: () => setState(_selected.clear), child: const Text('Clear')),
+                      TextButton(onPressed: () => setState(_selected.clear), child: Text(tr('Clear'))),
                       const Spacer(),
                       FilledButton.icon(
                         icon: const Icon(Icons.add_photo_alternate_outlined),
-                        label: Text('Add ${_count(_selected.length)}'),
+                        label: Text(tr('Add {photos}', {'photos': _count(_selected.length)})),
                         onPressed: () {
                           final picked = _selected.values.toList()..sort((a, b) => a.takenAt.compareTo(b.takenAt));
                           Navigator.pop(context, PickedPhotos(picked));
@@ -277,7 +320,7 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen> {
       child: Align(
         alignment: Alignment.centerLeft,
         child: FilterChip(
-          label: Text('Photos from ${formatDateRange(e.start!, e.end!)}'),
+          label: Text(tr('Photos from {dates}', {'dates': formatDateRange(e.start!, e.end!)})),
           selected: _onlyAlbumDates,
           onSelected: (v) => setState(() => _onlyAlbumDates = v),
         ),
@@ -292,24 +335,30 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen> {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            if (_loading) ...[const CircularProgressIndicator(), const SizedBox(height: 16)],
-            Text(
-              _loading
-                  ? 'Looking for photos…'
-                  : _onlyAlbumDates
-                      ? 'No photos from these days in this folder.'
-                      : 'No photos here.',
-              textAlign: TextAlign.center,
-            ),
-            if (!_loading && _onlyAlbumDates && _assets.isNotEmpty)
-              TextButton(onPressed: () => setState(() => _onlyAlbumDates = false), child: const Text('Show all photos')),
-          ]),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_loading) ...[const CircularProgressIndicator(), const SizedBox(height: 16)],
+              Text(
+                _loading
+                    ? tr('Looking for photos…')
+                    : _onlyAlbumDates
+                    ? tr('No photos from these days in this folder.')
+                    : tr('No photos here.'),
+                textAlign: TextAlign.center,
+              ),
+              if (!_loading && _onlyAlbumDates && _assets.isNotEmpty)
+                TextButton(
+                  onPressed: () => setState(() => _onlyAlbumDates = false),
+                  child: Text(tr('Show all photos')),
+                ),
+            ],
+          ),
         ),
       );
     }
 
-    // Group by day (assets are newest first).
+    // Group by day (sorted newest first, so each day appears once).
     final days = <List<GalleryAsset>>[];
     for (final a in visible) {
       if (days.isEmpty || dayKey(days.last.first.takenAt) != dayKey(a.takenAt)) days.add([]);
@@ -324,8 +373,9 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen> {
               date: day.first.takenAt,
               showYear: day.first.takenAt.year != now.year,
               count: day.length,
-              allSelected: day.where((a) => !_inAlbum.contains(a.id)).every((a) => _selected.containsKey(a.id)) &&
-                  day.any((a) => !_inAlbum.contains(a.id)),
+              allSelected:
+                  day.where((a) => !_isInAlbum(a)).every((a) => _selected.containsKey(a.id)) &&
+                  day.any((a) => !_isInAlbum(a)),
               onTap: () => _toggleDay(day),
             ),
           ),
@@ -337,26 +387,26 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen> {
                 mainAxisSpacing: 2,
                 crossAxisSpacing: 2,
               ),
-              delegate: SliverChildBuilderDelegate(
-                childCount: day.length,
-                (context, i) {
-                  final a = day[i];
-                  return _Tile(
-                    gallery: _g,
-                    asset: a,
-                    inAlbum: _inAlbum.contains(a.id),
-                    selected: _selected.containsKey(a.id),
-                    accent: s.primary,
-                    onTap: () => _toggle(a),
-                  );
-                },
-              ),
+              delegate: SliverChildBuilderDelegate(childCount: day.length, (context, i) {
+                final a = day[i];
+                return _Tile(
+                  gallery: _g,
+                  asset: a,
+                  inAlbum: _isInAlbum(a),
+                  selected: _selected.containsKey(a.id),
+                  accent: s.primary,
+                  onTap: () => _toggle(a),
+                );
+              }),
             ),
           ),
         ],
         if (_loading)
           const SliverToBoxAdapter(
-            child: Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator())),
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            ),
           ),
         const SliverToBoxAdapter(child: SizedBox(height: 24)),
       ],
@@ -389,7 +439,7 @@ class _DayHeading extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                DateFormat(showYear ? 'EEEE, d MMMM y' : 'EEEE, d MMMM').format(date),
+                DateFormat(showYear ? tr('EEEE, d MMMM y') : tr('EEEE, d MMMM')).format(date),
                 style: t.textTheme.titleSmall,
               ),
             ),
@@ -397,7 +447,7 @@ class _DayHeading extends StatelessWidget {
               allSelected ? Icons.check_circle : Icons.check_circle_outline,
               size: 22,
               color: allSelected ? t.colorScheme.primary : t.colorScheme.onSurfaceVariant,
-              semanticLabel: allSelected ? 'Deselect day' : 'Select day',
+              semanticLabel: allSelected ? tr('Deselect day') : tr('Select day'),
             ),
           ],
         ),
@@ -443,9 +493,11 @@ class _Tile extends StatelessWidget {
             ),
           ),
           if (inAlbum)
-            const ColoredBox(
+            ColoredBox(
               color: Colors.black45,
-              child: Center(child: Icon(Icons.check, color: Colors.white, semanticLabel: 'Already in this album')),
+              child: Center(
+                child: Icon(Icons.check, color: Colors.white, semanticLabel: tr('Already in this album')),
+              ),
             ),
           if (!inAlbum)
             Positioned(
@@ -478,14 +530,16 @@ class _NoAccess extends StatelessWidget {
           children: [
             const Icon(Icons.photo_library_outlined, size: 48),
             const SizedBox(height: 16),
-            const Text(
-              'To add photos without copying them, the app needs access to your photos. '
-              'Allow it in the app settings, including access to photo locations for the album map.',
+            Text(
+              tr(
+                'To add photos without copying them, the app needs access to your photos. '
+                'Allow it in the app settings, including access to photo locations for the album map.',
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
-            FilledButton(onPressed: onSettings, child: const Text('Open settings')),
-            TextButton(onPressed: onRetry, child: const Text('Try again')),
+            FilledButton(onPressed: onSettings, child: Text(tr('Open settings'))),
+            TextButton(onPressed: onRetry, child: Text(tr('Try again'))),
           ],
         ),
       ),

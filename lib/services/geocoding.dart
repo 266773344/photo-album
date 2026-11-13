@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
@@ -15,6 +16,9 @@ class Geocoder {
   static final instance = Geocoder();
 
   final http.Client _client;
+
+  /// Language for place names ('en', 'de'); see [L10n].
+  String language = 'en';
   final _cache = <String, Object?>{};
   Future<void> _queue = Future.value();
   DateTime _last = DateTime.fromMillisecondsSinceEpoch(0);
@@ -22,13 +26,14 @@ class Geocoder {
   static const _host = 'nominatim.openstreetmap.org';
 
   Map<String, String> get _headers => {
-        // Browsers don't allow setting User-Agent; they send a Referer instead.
-        if (!kIsWeb) 'User-Agent': 'PhotoAlbumApp/1.0 (Flutter personal photo album)',
-        'Accept-Language': PlatformDispatcher.instance.locale.languageCode,
-      };
+    // Browsers don't allow setting User-Agent; they send a Referer instead.
+    if (!kIsWeb) 'User-Agent': 'PhotoAlbumApp/1.0 (Flutter personal photo album)',
+  };
 
   Future<Object?> _get(String path, Map<String, String> params) {
-    final uri = Uri.https(_host, path, {...params, 'format': 'jsonv2'});
+    // The language is part of the URL (not a header) so cached answers stay
+    // per language, and browsers can't override it.
+    final uri = Uri.https(_host, path, {...params, 'format': 'jsonv2', 'accept-language': language});
     final key = uri.toString();
     if (_cache.containsKey(key)) return Future.value(_cache[key]);
     final completer = Completer<Object?>();
@@ -101,7 +106,10 @@ GeoPlace placeFromNominatim(Map<String, dynamic> r, {bool cityLevel = false}) {
     final n = r['name'] as String?;
     name = (n != null && n.isNotEmpty)
         ? n
-        : [pick(['road', 'pedestrian', 'square']), pick(['house_number'])].nonNulls.join(' ');
+        : [
+            pick(['road', 'pedestrian', 'square']),
+            pick(['house_number']),
+          ].nonNulls.join(' ');
     if (name.isEmpty) name = display.split(',').first;
   }
   // A compact address: road + town + country, skipping what's already in the name.

@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../l10n/strings.dart';
+
 import '../services/place_story.dart';
 import '../widgets/common.dart';
 
@@ -28,39 +30,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final muted = t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(title: Text(tr('Settings'))),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
-          Text('Places & maps', style: t.textTheme.titleMedium),
+          Text(tr('Language'), style: t.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          SegmentedButton<String>(
+            segments: [
+              ButtonSegment(value: 'system', label: Text(tr('Phone')), icon: const Icon(Icons.smartphone)),
+              // Language names are shown in their own language.
+              const ButtonSegment(value: 'en', label: Text('English')),
+              const ButtonSegment(value: 'de', label: Text('Deutsch')),
+            ],
+            selected: {s.language},
+            showSelectedIcon: false,
+            onSelectionChanged: (v) => repo.updateSettings(s.copyWith(language: v.single)),
+          ),
+          const SizedBox(height: 6),
+          Text(tr('Also used for place names and place descriptions.'), style: muted),
+          const Divider(height: 32),
+          Text(tr('Places & maps'), style: t.textTheme.titleMedium),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('Look up place names online'),
-            subtitle: const Text(
-              'Uses OpenStreetMap to name the places in your photos and to search for places. '
-              'Only coordinates or your search text are sent — never photos. Map tiles always load from OpenStreetMap.',
+            title: Text(tr('Look up place names online')),
+            subtitle: Text(
+              tr(
+                'Uses OpenStreetMap to name the places in your photos and to search for places. '
+                'Only coordinates or your search text are sent — never photos. Map tiles always load from OpenStreetMap.',
+              ),
             ),
             value: s.onlineLookups,
             onChanged: (v) => repo.updateSettings(s.copyWith(onlineLookups: v)),
           ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('Draw real travel routes'),
-            subtitle: const Text(
-              'Lines on the map follow roads and footpaths (OpenStreetMap routing, routing.openstreetmap.de). '
-              'Only the coordinates of the stops are sent. Train and boat trips can be set by tapping a line on the map.',
+            title: Text(tr('Draw real travel routes')),
+            subtitle: Text(
+              tr(
+                'Lines on the map follow roads and footpaths (OpenStreetMap routing, routing.openstreetmap.de). '
+                'Only the coordinates of the stops are sent. Train and boat trips can be set by tapping a line on the map.',
+              ),
             ),
             value: s.realRoutes && s.onlineLookups,
             onChanged: s.onlineLookups ? (v) => repo.updateSettings(s.copyWith(realRoutes: v)) : null,
           ),
           const Divider(height: 32),
-          Text('Place descriptions (AI)', style: t.textTheme.titleMedium),
+          Text(tr('Place descriptions (AI)'), style: t.textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(
-            'Moments with a place can get a short description — e.g. the history of the building or what the café is '
-            'known for. Claude searches the web and writes it from what it finds. This uses your own Anthropic API key '
-            '(console.anthropic.com); each description costs a few cents. Only the place name, address, the moment\'s '
-            'title and date are sent.',
+            tr(
+              'Moments with a place can get a short description — e.g. the history of the building or what the café is '
+              'known for. Claude searches the web and writes it from what it finds. This uses your own Anthropic API key '
+              '(console.anthropic.com); each description costs a few cents. Only the place name, address, the moment\'s '
+              'title and date are sent.',
+            ),
             style: muted,
           ),
           const SizedBox(height: 12),
@@ -70,7 +94,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             autocorrect: false,
             enableSuggestions: false,
             decoration: InputDecoration(
-              labelText: 'Anthropic API key',
+              labelText: tr('Anthropic API key'),
               hintText: 'sk-ant-…',
               border: const OutlineInputBorder(),
               suffixIcon: IconButton(
@@ -81,14 +105,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: (v) => repo.updateSettings(s.copyWith(apiKey: v.trim())),
           ),
           const SizedBox(height: 6),
-          Text('Stored only on this device, together with your albums.', style: muted),
+          Text(tr('Stored only on this device, together with your albums.'), style: muted),
           const SizedBox(height: 16),
           DropdownMenu<String>(
             initialSelection: s.model,
-            label: const Text('Model'),
+            label: Text(tr('Model')),
             expandedInsets: EdgeInsets.zero,
             dropdownMenuEntries: [
-              for (final (id, label, hint) in storyModels) DropdownMenuEntry(value: id, label: label, trailingIcon: Text(hint, style: muted)),
+              for (final (id, label, hint) in storyModels)
+                DropdownMenuEntry(
+                  value: id,
+                  label: label,
+                  trailingIcon: Text(tr(hint), style: muted),
+                ),
             ],
             onSelected: (v) {
               if (v != null) repo.updateSettings(s.copyWith(model: v));
@@ -96,8 +125,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('Write descriptions automatically'),
-            subtitle: const Text('As soon as a moment gets a place. Otherwise, tap “About this place” on a moment.'),
+            title: Text(tr('Write descriptions automatically')),
+            subtitle: Text(tr('As soon as a moment gets a place. Otherwise, tap “About this place” on a moment.')),
             value: s.autoStories,
             onChanged: s.canWriteStories ? (v) => repo.updateSettings(s.copyWith(autoStories: v)) : null,
           ),

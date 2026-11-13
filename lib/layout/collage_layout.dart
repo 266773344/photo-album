@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'dart:ui' show Rect;
 
+import '../models/models.dart' show PhotoSize;
+
 /// Dynamic collage layout.
 ///
 /// A collage block is a small tree of rows and columns whose leaves are
@@ -72,8 +74,7 @@ class PlacedPhoto {
 
 /// One horizontal band of the collage, spanning the full width.
 class CollageBlock {
-  CollageBlock(this.node, this.template, this.width)
-      : height = width / node.aspect {
+  CollageBlock(this.node, this.template, this.width) : height = width / node.aspect {
     node.place(Rect.fromLTWH(0, 0, width, height), cells);
   }
 
@@ -96,23 +97,62 @@ final Map<int, Map<String, _Template>> _templates = {
   },
   3: {
     'row3': (l) => RowNode([l[0], l[1], l[2]]),
-    'bigLeft': (l) => RowNode([l[0], ColumnNode([l[1], l[2]])]),
-    'bigRight': (l) => RowNode([ColumnNode([l[0], l[1]]), l[2]]),
-    'bigTop': (l) => ColumnNode([l[0], RowNode([l[1], l[2]])]),
-    'bigBottom': (l) => ColumnNode([RowNode([l[0], l[1]]), l[2]]),
+    'bigLeft': (l) => RowNode([
+      l[0],
+      ColumnNode([l[1], l[2]]),
+    ]),
+    'bigRight': (l) => RowNode([
+      ColumnNode([l[0], l[1]]),
+      l[2],
+    ]),
+    'bigTop': (l) => ColumnNode([
+      l[0],
+      RowNode([l[1], l[2]]),
+    ]),
+    'bigBottom': (l) => ColumnNode([
+      RowNode([l[0], l[1]]),
+      l[2],
+    ]),
   },
   4: {
     'row4': (l) => RowNode([l[0], l[1], l[2], l[3]]),
-    'bigLeft3': (l) => RowNode([l[0], ColumnNode([l[1], l[2], l[3]])]),
-    'bigRight3': (l) => RowNode([ColumnNode([l[0], l[1], l[2]]), l[3]]),
-    'bigTop3': (l) => ColumnNode([l[0], RowNode([l[1], l[2], l[3]])]),
-    'grid': (l) => ColumnNode([RowNode([l[0], l[1]]), RowNode([l[2], l[3]])]),
-    'cols2x2': (l) => RowNode([ColumnNode([l[0], l[1]]), ColumnNode([l[2], l[3]])]),
-    'mosaic': (l) => RowNode([l[0], ColumnNode([l[1], RowNode([l[2], l[3]])])]),
+    'bigLeft3': (l) => RowNode([
+      l[0],
+      ColumnNode([l[1], l[2], l[3]]),
+    ]),
+    'bigRight3': (l) => RowNode([
+      ColumnNode([l[0], l[1], l[2]]),
+      l[3],
+    ]),
+    'bigTop3': (l) => ColumnNode([
+      l[0],
+      RowNode([l[1], l[2], l[3]]),
+    ]),
+    'grid': (l) => ColumnNode([
+      RowNode([l[0], l[1]]),
+      RowNode([l[2], l[3]]),
+    ]),
+    'cols2x2': (l) => RowNode([
+      ColumnNode([l[0], l[1]]),
+      ColumnNode([l[2], l[3]]),
+    ]),
+    'mosaic': (l) => RowNode([
+      l[0],
+      ColumnNode([
+        l[1],
+        RowNode([l[2], l[3]]),
+      ]),
+    ]),
   },
   5: {
-    'twoThree': (l) => ColumnNode([RowNode([l[0], l[1]]), RowNode([l[2], l[3], l[4]])]),
-    'threeTwo': (l) => ColumnNode([RowNode([l[0], l[1], l[2]]), RowNode([l[3], l[4]])]),
+    'twoThree': (l) => ColumnNode([
+      RowNode([l[0], l[1]]),
+      RowNode([l[2], l[3], l[4]]),
+    ]),
+    'threeTwo': (l) => ColumnNode([
+      RowNode([l[0], l[1], l[2]]),
+      RowNode([l[3], l[4]]),
+    ]),
   },
 };
 
@@ -121,7 +161,17 @@ final Map<int, Map<String, _Template>> _templates = {
 ///
 /// With [airy] the engine prefers fewer, larger photos per band (more singles
 /// and pairs, taller bands) for a calmer page.
-List<CollageBlock> buildCollage(List<double> aspects, double width, {int seed = 0, bool airy = false}) {
+///
+/// [sizes] (per photo, optional) asks for more or less room: a `large` photo
+/// is steered into the big cell of a band, a `full` one gets a band of its
+/// own, `small` ones go into busier bands. Without it nothing changes.
+List<CollageBlock> buildCollage(
+  List<double> aspects,
+  double width, {
+  int seed = 0,
+  bool airy = false,
+  List<PhotoSize>? sizes,
+}) {
   final rnd = math.Random(seed);
   // Ideal block height: roughly 70% of the width on phones, capped on large
   // screens so blocks don't become huge.
@@ -136,9 +186,24 @@ List<CollageBlock> buildCollage(List<double> aspects, double width, {int seed = 
     final remaining = aspects.length - i;
     // Seeded preference for how many photos this block should hold.
     final roll = rnd.nextDouble();
-    final desired = airy
-        ? (roll < 0.24 ? 1 : roll < 0.66 ? 2 : roll < 0.94 ? 3 : 4)
-        : (roll < 0.14 ? 1 : roll < 0.42 ? 2 : roll < 0.78 ? 3 : roll < 0.95 ? 4 : 5);
+    final desiredByRoll = airy
+        ? (roll < 0.24
+              ? 1
+              : roll < 0.66
+              ? 2
+              : roll < 0.94
+              ? 3
+              : 4)
+        : (roll < 0.14
+              ? 1
+              : roll < 0.42
+              ? 2
+              : roll < 0.78
+              ? 3
+              : roll < 0.95
+              ? 4
+              : 5);
+    final desired = sizes != null && sizes[i] == PhotoSize.full ? 1 : desiredByRoll;
 
     _Candidate? best;
     for (final entry in _templates.entries) {
@@ -156,6 +221,7 @@ List<CollageBlock> buildCollage(List<double> aspects, double width, {int seed = 
         }
         // Very tall blocks are hard to take in on a phone.
         if (block.height > width * 1.35) score += (block.height / width - 1.35) * 3;
+        if (sizes != null) score += _sizePenalty(block, sizes, n, width * idealHeight);
         score += (n - desired).abs() * 0.45;
         if (t.key == lastTemplate) score += 0.6;
         // Avoid leaving a lonely single photo at the very end.
@@ -169,6 +235,26 @@ List<CollageBlock> buildCollage(List<double> aspects, double width, {int seed = 
     i += best.count;
   }
   return blocks;
+}
+
+/// How far a block is from giving its photos the room they asked for.
+/// Cell areas are compared with a typical band ([typicalArea]).
+double _sizePenalty(CollageBlock block, List<PhotoSize> sizes, int n, double typicalArea) {
+  var penalty = 0.0;
+  for (final c in block.cells) {
+    final share = c.rect.width * c.rect.height / typicalArea;
+    switch (sizes[c.index]) {
+      case PhotoSize.full:
+        if (n > 1) penalty += 6;
+      case PhotoSize.large:
+        penalty += 8 * math.max(0.0, 0.45 - share);
+      case PhotoSize.small:
+        penalty += 1.5 * math.max(0.0, share - 0.3);
+      case PhotoSize.normal:
+        break;
+    }
+  }
+  return penalty;
 }
 
 class _Candidate {

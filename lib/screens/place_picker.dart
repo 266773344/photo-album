@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import '../l10n/strings.dart';
+
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
@@ -11,16 +13,13 @@ import '../widgets/common.dart';
 
 /// Lets the user choose a place: search by name, tap the map, or paste a
 /// Google Maps link. Returns the chosen [GeoPlace], or null when cancelled.
-Future<GeoPlace?> pickPlace(
-  BuildContext context, {
-  String title = 'Choose a place',
-  GeoPlace? initial,
-  LatLng? near,
-}) {
-  return Navigator.of(context).push<GeoPlace>(MaterialPageRoute(
-    fullscreenDialog: true,
-    builder: (_) => PlacePickerScreen(title: title, initial: initial, near: near),
-  ));
+Future<GeoPlace?> pickPlace(BuildContext context, {String? title, GeoPlace? initial, LatLng? near}) {
+  return Navigator.of(context).push<GeoPlace>(
+    MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) => PlacePickerScreen(title: title ?? tr('Choose a place'), initial: initial, near: near),
+    ),
+  );
 }
 
 class PlacePickerScreen extends StatefulWidget {
@@ -80,14 +79,16 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
       if (link == null) {
         setState(() {
           _searching = false;
-          _message = 'Short links can\'t be opened here. Open the link in Google Maps and copy the full address from the browser bar.';
+          _message = tr(
+            'Short links can\'t be opened here. Open the link in Google Maps and copy the full address from the browser bar.',
+          );
         });
         return;
       }
     }
     if (link != null) {
       if (link.hasPosition) {
-        var place = GeoPlace(name: link.name ?? 'Pinned location', lat: link.lat!, lng: link.lng!);
+        var place = GeoPlace(name: link.name ?? tr('Pinned location'), lat: link.lat!, lng: link.lng!);
         if (link.name == null && _online) {
           place = await _geo.reverse(link.lat!, link.lng!).catchError((_) => null) ?? place;
         }
@@ -100,7 +101,9 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
     }
 
     if (!_online) {
-      setState(() => _message = 'Online place search is turned off in Settings. Tap the map to drop a pin instead.');
+      setState(
+        () => _message = tr('Online place search is turned off in Settings. Tap the map to drop a pin instead.'),
+      );
       return;
     }
     setState(() {
@@ -113,7 +116,7 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
       if (!mounted || _query.text.trim() != text.trim()) return;
       setState(() {
         _results = results;
-        _message = results.isEmpty ? 'Nothing found. Try adding the town, or tap the map.' : null;
+        _message = results.isEmpty ? tr('Nothing found. Try adding the town, or tap the map.') : null;
       });
     } catch (e) {
       if (mounted) setState(() => _message = '$e');
@@ -134,7 +137,7 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
 
   Future<void> _dropPin(LatLng point) async {
     setState(() {
-      _selected = GeoPlace(name: 'Pinned location', lat: point.latitude, lng: point.longitude);
+      _selected = GeoPlace(name: tr('Pinned location'), lat: point.latitude, lng: point.longitude);
       _results = [];
       _resolvingPin = _online;
     });
@@ -143,7 +146,10 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
       final named = await _geo.reverse(point.latitude, point.longitude);
       if (!mounted || _selected?.lat != point.latitude) return;
       if (named != null) {
-        setState(() => _selected = GeoPlace(name: named.name, address: named.address, lat: point.latitude, lng: point.longitude));
+        setState(
+          () =>
+              _selected = GeoPlace(name: named.name, address: named.address, lat: point.latitude, lng: point.longitude),
+        );
       }
     } catch (_) {
       // Keep the unnamed pin.
@@ -154,7 +160,7 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
 
   Future<void> _rename() async {
     final p = _selected!;
-    final name = await editTextDialog(context, title: 'Name this place', initial: p.name, multiline: false);
+    final name = await editTextDialog(context, title: tr('Name this place'), initial: p.name, multiline: false);
     if (name == null || name.isEmpty || !mounted) return;
     setState(() => _selected = GeoPlace(name: name, address: p.address, lat: p.lat, lng: p.lng));
   }
@@ -175,20 +181,23 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
               onSubmitted: _search,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
-                hintText: 'Search a place, or paste a Google Maps link',
+                hintText: tr('Search a place, or paste a Google Maps link'),
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _searching
-                    ? const Padding(padding: EdgeInsets.all(12), child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                      )
                     : _query.text.isEmpty
-                        ? null
-                        : IconButton(
-                            icon: const Icon(Icons.clear),
-                            onPressed: () => setState(() {
-                              _query.clear();
-                              _results = [];
-                              _message = null;
-                            }),
-                          ),
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () => setState(() {
+                          _query.clear();
+                          _results = [];
+                          _message = null;
+                        }),
+                      ),
                 filled: true,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(28), borderSide: BorderSide.none),
               ),
@@ -209,15 +218,17 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                   children: [
                     ...baseMapLayers(context),
                     if (_selected != null)
-                      MarkerLayer(markers: [
-                        Marker(
-                          point: LatLng(_selected!.lat, _selected!.lng),
-                          width: 44,
-                          height: 44,
-                          alignment: Alignment.topCenter,
-                          child: Icon(Icons.place, size: 44, color: s.primary),
-                        ),
-                      ]),
+                      MarkerLayer(
+                        markers: [
+                          Marker(
+                            point: LatLng(_selected!.lat, _selected!.lng),
+                            width: 44,
+                            height: 44,
+                            alignment: Alignment.topCenter,
+                            child: Icon(Icons.place, size: 44, color: s.primary),
+                          ),
+                        ],
+                      ),
                     osmAttribution(),
                   ],
                 ),
@@ -260,7 +271,10 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                 child: _selected == null
-                    ? Text('Search above, or tap the map to drop a pin.', style: TextStyle(color: s.onSurfaceVariant))
+                    ? Text(
+                        tr('Search above, or tap the map to drop a pin.'),
+                        style: TextStyle(color: s.onSurfaceVariant),
+                      )
                     : Row(
                         children: [
                           Expanded(
@@ -270,25 +284,38 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Row(children: [
-                                    Flexible(
-                                      child: Text(_selected!.name,
-                                          style: Theme.of(context).textTheme.titleMedium, maxLines: 1, overflow: TextOverflow.ellipsis),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Icon(Icons.edit_outlined, size: 16, color: s.onSurfaceVariant),
-                                  ]),
+                                  Row(
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          _selected!.name,
+                                          style: Theme.of(context).textTheme.titleMedium,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Icon(Icons.edit_outlined, size: 16, color: s.onSurfaceVariant),
+                                    ],
+                                  ),
                                   if (_resolvingPin)
                                     const LinearProgressIndicator()
                                   else if (_selected!.address.isNotEmpty)
-                                    Text(_selected!.address,
-                                        maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: s.onSurfaceVariant)),
+                                    Text(
+                                      _selected!.address,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(color: s.onSurfaceVariant),
+                                    ),
                                 ],
                               ),
                             ),
                           ),
                           const SizedBox(width: 12),
-                          FilledButton(onPressed: () => Navigator.pop(context, _selected), child: const Text('Use this place')),
+                          FilledButton(
+                            onPressed: () => Navigator.pop(context, _selected),
+                            child: Text(tr('Use this place')),
+                          ),
                         ],
                       ),
               ),

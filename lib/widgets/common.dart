@@ -1,5 +1,7 @@
 import 'dart:ui' as ui;
 
+import '../l10n/strings.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:material_ui/material_ui.dart';
@@ -18,8 +20,7 @@ class AlbumScope extends InheritedNotifier<AlbumRepository> {
       context.dependOnInheritedWidgetOfExactType<AlbumScope>()!.notifier!;
 
   /// Access without subscribing (for callbacks).
-  static AlbumRepository read(BuildContext context) =>
-      context.getInheritedWidgetOfExactType<AlbumScope>()!.notifier!;
+  static AlbumRepository read(BuildContext context) => context.getInheritedWidgetOfExactType<AlbumScope>()!.notifier!;
 }
 
 /// Image provider that loads bytes from the album's blob storage.
@@ -104,8 +105,8 @@ class PhotoThumb extends StatelessWidget {
     final placeholder = transparent
         ? Colors.transparent
         : photo.palette.isEmpty
-            ? Colors.grey.shade400
-            : Color(photo.palette.first.argb);
+        ? Colors.grey.shade400
+        : Color(photo.palette.first.argb);
     Widget child = ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: ColoredBox(
@@ -134,14 +135,15 @@ class PhotoThumb extends StatelessWidget {
 }
 
 String formatDateRange(DateTime? start, DateTime? end) {
-  if (start == null || end == null) return 'No photos yet';
-  final d = DateFormat('d MMM y');
+  if (start == null || end == null) return tr('No photos yet');
+  final d = DateFormat(tr('d MMM y'));
   if (dayKey(start) == dayKey(end)) return d.format(start);
   if (start.year == end.year && start.month == end.month) {
-    return '${start.day}–${DateFormat('d MMM y').format(end)}';
+    // "1–5 Aug 2024" / "1.–5. Aug. 2024"
+    return '${start.day}${L10n.german ? '.' : ''}–${d.format(end)}';
   }
   if (start.year == end.year) {
-    return '${DateFormat('d MMM').format(start)} – ${d.format(end)}';
+    return '${DateFormat(tr('d MMM')).format(start)} – ${d.format(end)}';
   }
   return '${d.format(start)} – ${d.format(end)}';
 }
@@ -168,25 +170,31 @@ Future<String?> editTextDialog(
         decoration: InputDecoration(hintText: hint, border: const OutlineInputBorder()),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()), child: const Text('Save')),
+        TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Cancel'))),
+        FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()), child: Text(tr('Save'))),
       ],
     ),
   );
 }
 
-Future<bool> confirmDialog(BuildContext context, {required String title, required String message, String action = 'Delete'}) async {
+Future<bool> confirmDialog(
+  BuildContext context, {
+  required String title,
+  required String message,
+  String? action,
+}) async {
+  final label = action ?? tr('Delete');
   final result = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
       title: Text(title),
       content: Text(message),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
         FilledButton(
           style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
           onPressed: () => Navigator.pop(context, true),
-          child: Text(action),
+          child: Text(label),
         ),
       ],
     ),

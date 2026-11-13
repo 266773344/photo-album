@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../l10n/strings.dart';
+
 import '../models/grouping.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
@@ -19,35 +21,35 @@ Future<bool> showPhotoActions(BuildContext context, AlbumEvent e, Photo p) async
         children: [
           ListTile(
             leading: const Icon(Icons.short_text),
-            title: Text(p.caption.isEmpty ? 'Add caption' : 'Edit caption'),
+            title: Text(p.caption.isEmpty ? tr('Add caption') : tr('Edit caption')),
             onTap: () => Navigator.pop(context, 'caption'),
           ),
           ListTile(
             leading: Icon(e.cover?.id == p.id ? Icons.star : Icons.star_outline),
-            title: const Text('Use as album cover'),
+            title: Text(tr('Use as album cover')),
             enabled: e.cover?.id != p.id,
             onTap: () => Navigator.pop(context, 'cover'),
           ),
           ListTile(
             leading: const Icon(Icons.add_location_alt_outlined),
-            title: Text(p.hasLocation ? 'Change location' : 'Set location'),
+            title: Text(p.hasLocation ? tr('Change location') : tr('Set location')),
             onTap: () => Navigator.pop(context, 'location'),
           ),
           if (stack != null) ...[
             ListTile(
               leading: const Icon(Icons.first_page),
-              title: const Text('Show first in carousel'),
+              title: Text(tr('Show first in carousel')),
               onTap: () => Navigator.pop(context, 'stackcover'),
             ),
             ListTile(
               leading: const Icon(Icons.call_split),
-              title: const Text('Take out of carousel'),
+              title: Text(tr('Take out of carousel')),
               onTap: () => Navigator.pop(context, 'unstack'),
             ),
           ],
           ListTile(
             leading: const Icon(Icons.delete_outline),
-            title: const Text('Remove from album'),
+            title: Text(tr('Remove from album')),
             onTap: () => Navigator.pop(context, 'delete'),
           ),
         ],
@@ -58,7 +60,12 @@ Future<bool> showPhotoActions(BuildContext context, AlbumEvent e, Photo p) async
   final repo = AlbumScope.read(context);
   switch (action) {
     case 'caption':
-      final text = await editTextDialog(context, title: 'Caption', initial: p.caption, hint: 'Say something about this photo');
+      final text = await editTextDialog(
+        context,
+        title: tr('Caption'),
+        initial: p.caption,
+        hint: tr('Say something about this photo'),
+      );
       if (text == null) return false;
       p.caption = text;
     case 'cover':
@@ -66,8 +73,8 @@ Future<bool> showPhotoActions(BuildContext context, AlbumEvent e, Photo p) async
     case 'location':
       final place = await pickPlace(
         context,
-        title: 'Where was this photo taken?',
-        initial: p.hasLocation ? GeoPlace(name: 'Current location', lat: p.lat!, lng: p.lng!) : null,
+        title: tr('Where was this photo taken?'),
+        initial: p.hasLocation ? GeoPlace(name: tr('Current location'), lat: p.lat!, lng: p.lng!) : null,
         near: photosCenter(e.photos),
       );
       if (place == null) return false;
@@ -78,7 +85,12 @@ Future<bool> showPhotoActions(BuildContext context, AlbumEvent e, Photo p) async
     case 'unstack':
       e.removeFromStack(p.id);
     case 'delete':
-      final ok = await confirmDialog(context, title: 'Remove photo?', message: 'The photo will be removed from this album.', action: 'Remove');
+      final ok = await confirmDialog(
+        context,
+        title: tr('Remove photo?'),
+        message: tr('The photo will be removed from this album.'),
+        action: tr('Remove'),
+      );
       if (!ok) return false;
       await repo.deletePhoto(e, p);
       return true;

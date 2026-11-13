@@ -2,6 +2,8 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../l10n/strings.dart';
+
 import '../models/models.dart';
 import '../widgets/common.dart';
 import 'place_picker.dart';
@@ -100,7 +102,7 @@ class _MomentSheetState extends State<_MomentSheet> {
 
   Future<void> _choosePlace() async {
     final center = photosCenter(_photos) ?? photosCenter(widget.event.photos);
-    final picked = await pickPlace(context, title: 'Place of this moment', initial: _place, near: center);
+    final picked = await pickPlace(context, title: tr('Place of this moment'), initial: _place, near: center);
     if (picked != null && mounted) {
       setState(() {
         _place = picked;
@@ -124,7 +126,7 @@ class _MomentSheetState extends State<_MomentSheet> {
   String _describe(Moment m) {
     final photos = widget.event.photos.where((p) => m.photoIds.contains(p.id)).toList();
     if (photos.isEmpty) return '';
-    return '${DateFormat('EEE d MMM, HH:mm').format(photos.first.takenAt)} · ${photos.length} photos';
+    return '${DateFormat(tr('EEE d MMM, HH:mm')).format(photos.first.takenAt)} · ${trn('{n} photo', '{n} photos', photos.length)}';
   }
 
   @override
@@ -143,12 +145,15 @@ class _MomentSheetState extends State<_MomentSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(editing ? 'Edit moment' : 'New moment', style: t.textTheme.headlineSmall),
+              Text(editing ? tr('Edit moment') : tr('New moment'), style: t.textTheme.headlineSmall),
               if (!editing) ...[
                 const SizedBox(height: 4),
                 Text(
-                  'Give ${n == 1 ? 'this photo' : 'these $n photos'} their own little chapter within the day, '
-                  'like “Breakfast at Café Lua”.',
+                  trn(
+                    'Give this photo its own little chapter within the day, like “Breakfast at Café Lua”.',
+                    'Give these {n} photos their own little chapter within the day, like “Breakfast at Café Lua”.',
+                    n,
+                  ),
                   style: t.textTheme.bodyMedium?.copyWith(color: s.onSurfaceVariant),
                 ),
               ],
@@ -157,8 +162,8 @@ class _MomentSheetState extends State<_MomentSheet> {
                 controller: _title,
                 autofocus: !editing,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(labelText: 'Title', border: OutlineInputBorder()),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter a title' : null,
+                decoration: InputDecoration(labelText: tr('Title'), border: OutlineInputBorder()),
+                validator: (v) => (v == null || v.trim().isEmpty) ? tr('Please enter a title') : null,
                 onFieldSubmitted: (_) => _submit(),
               ),
               const SizedBox(height: 12),
@@ -167,8 +172,8 @@ class _MomentSheetState extends State<_MomentSheet> {
                 minLines: 2,
                 maxLines: 5,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: 'Note (optional)',
+                decoration: InputDecoration(
+                  labelText: tr('Note (optional)'),
                   alignLabelWithHint: true,
                   border: OutlineInputBorder(),
                 ),
@@ -180,18 +185,21 @@ class _MomentSheetState extends State<_MomentSheet> {
                 child: ListTile(
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   leading: Icon(_place == null ? Icons.add_location_alt_outlined : Icons.place, color: s.primary),
-                  title: Text(_place?.name ?? (_looking ? 'Finding the place…' : 'Add a place (optional)')),
+                  title: Text(_place?.name ?? (_looking ? tr('Finding the place…') : tr('Add a place (optional)'))),
                   subtitle: _place == null
                       ? null
                       : Text(
-                          [if (_suggested) 'Suggested from photo location', if (_place!.address.isNotEmpty) _place!.address].join(' · '),
+                          [
+                            if (_suggested) tr('Suggested from photo location'),
+                            if (_place!.address.isNotEmpty) _place!.address,
+                          ].join(' · '),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                   trailing: _place == null
                       ? null
                       : IconButton(
-                          tooltip: 'Remove place',
+                          tooltip: tr('Remove place'),
                           icon: const Icon(Icons.close),
                           onPressed: () => setState(() {
                             _place = null;
@@ -202,10 +210,10 @@ class _MomentSheetState extends State<_MomentSheet> {
                 ),
               ),
               const SizedBox(height: 16),
-              FilledButton(onPressed: _submit, child: Text(editing ? 'Save' : 'Create moment')),
+              FilledButton(onPressed: _submit, child: Text(editing ? tr('Save') : tr('Create moment'))),
               if (others.isNotEmpty) ...[
                 const SizedBox(height: 20),
-                Text('Or add to an existing moment', style: t.textTheme.titleSmall),
+                Text(tr('Or add to an existing moment'), style: t.textTheme.titleSmall),
                 const SizedBox(height: 4),
                 for (final m in others)
                   ListTile(

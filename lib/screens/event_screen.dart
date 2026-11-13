@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import '../l10n/strings.dart';
+
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -26,36 +28,42 @@ import 'theme_picker.dart';
 String _albumRouteName(String eventId) => 'album/$eventId';
 
 void openAlbumMap(BuildContext context, AlbumEvent e, {LatLng? focus}) {
-  Navigator.of(context).push(MaterialPageRoute<void>(
-    builder: (_) => Theme(
-      data: EventStyle.of(e).themeData,
-      child: AlbumMapScreen(
-        eventId: e.id,
-        focus: focus,
-        // Tapping a stop goes back to the album, scrolled to its photos.
-        onTapVisit: (ctx, visit) {
-          AlbumScope.read(ctx).requestFocus(e, [for (final p in visit.photos) p.id]);
-          Navigator.of(ctx).popUntil((r) => r.settings.name == _albumRouteName(e.id) || r.isFirst);
-        },
+  Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => Theme(
+        data: EventStyle.of(e).themeData,
+        child: AlbumMapScreen(
+          eventId: e.id,
+          focus: focus,
+          // Tapping a stop goes back to the album, scrolled to its photos.
+          onTapVisit: (ctx, visit) {
+            AlbumScope.read(ctx).requestFocus(e, [for (final p in visit.photos) p.id]);
+            Navigator.of(ctx).popUntil((r) => r.settings.name == _albumRouteName(e.id) || r.isFirst);
+          },
+        ),
       ),
     ),
-  ));
+  );
 }
 
 void openPhotoViewer(BuildContext context, AlbumEvent e, Photo p) {
-  Navigator.of(context).push(PageRouteBuilder<void>(
-    opaque: false,
-    transitionDuration: const Duration(milliseconds: 300),
-    pageBuilder: (_, _, _) => PhotoViewer(eventId: e.id, initialPhotoId: p.id),
-    transitionsBuilder: (_, anim, _, child) => FadeTransition(opacity: anim, child: child),
-  ));
+  Navigator.of(context).push(
+    PageRouteBuilder<void>(
+      opaque: false,
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (_, _, _) => PhotoViewer(eventId: e.id, initialPhotoId: p.id),
+      transitionsBuilder: (_, anim, _, child) => FadeTransition(opacity: anim, child: child),
+    ),
+  );
 }
 
 void openEvent(BuildContext context, AlbumEvent e, {bool pickPhotos = false}) {
-  Navigator.of(context).push(MaterialPageRoute<void>(
-    settings: RouteSettings(name: _albumRouteName(e.id)),
-    builder: (_) => EventScreen(eventId: e.id, pickPhotosOnOpen: pickPhotos),
-  ));
+  Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      settings: RouteSettings(name: _albumRouteName(e.id)),
+      builder: (_) => EventScreen(eventId: e.id, pickPhotosOnOpen: pickPhotos),
+    ),
+  );
 }
 
 const _maxContentWidth = 1000.0;
@@ -152,7 +160,10 @@ class _EventScreenState extends State<EventScreen> {
       if (visible.isEmpty) break;
       final down = visible.reduce(math.max) < order[target]!;
       final pos = _scroll.position;
-      final next = (pos.pixels + pos.viewportDimension * 0.8 * (down ? 1 : -1)).clamp(pos.minScrollExtent, pos.maxScrollExtent);
+      final next = (pos.pixels + pos.viewportDimension * 0.8 * (down ? 1 : -1)).clamp(
+        pos.minScrollExtent,
+        pos.maxScrollExtent,
+      );
       if (next == pos.pixels) break;
       pos.jumpTo(next);
       await WidgetsBinding.instance.endOfFrame;
@@ -241,7 +252,7 @@ class _EventScreenState extends State<EventScreen> {
     e.createStack(_selected);
     _clearSelection();
     await _persist(e);
-    _snack('Grouped $n photos into a carousel');
+    _snack(tr('Grouped {n} photos into a carousel', {'n': n}));
   }
 
   Future<void> _addToMoment(AlbumEvent e) async {
@@ -276,8 +287,8 @@ class _EventScreenState extends State<EventScreen> {
     final initial = photos.where((p) => p.hasLocation).firstOrNull;
     final place = await pickPlace(
       context,
-      title: 'Where were ${photos.length == 1 ? 'this photo' : 'these photos'} taken?',
-      initial: initial == null ? null : GeoPlace(name: 'Current location', lat: initial.lat!, lng: initial.lng!),
+      title: photos.length == 1 ? tr('Where was this photo taken?') : tr('Where were these photos taken?'),
+      initial: initial == null ? null : GeoPlace(name: tr('Current location'), lat: initial.lat!, lng: initial.lng!),
       near: photosCenter(e.photos),
     );
     if (place == null || !mounted) return;
@@ -292,38 +303,41 @@ class _EventScreenState extends State<EventScreen> {
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(
-            leading: const Icon(Icons.edit_outlined),
-            title: const Text('Edit title, note & place'),
-            onTap: () => Navigator.pop(context, 'edit'),
-          ),
-          if (m.place != null)
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
             ListTile(
-              leading: const Icon(Icons.auto_awesome_outlined),
-              title: Text(m.story == null ? 'Write “About this place”' : 'Rewrite “About this place”'),
-              subtitle: canWrite ? null : const Text('Needs an Anthropic API key (Settings)'),
-              enabled: canWrite,
-              onTap: () => Navigator.pop(context, 'story'),
+              leading: const Icon(Icons.edit_outlined),
+              title: Text(tr('Edit title, note & place')),
+              onTap: () => Navigator.pop(context, 'edit'),
             ),
-          if (m.story != null)
+            if (m.place != null)
+              ListTile(
+                leading: const Icon(Icons.auto_awesome_outlined),
+                title: Text(m.story == null ? tr('Write “About this place”') : tr('Rewrite “About this place”')),
+                subtitle: canWrite ? null : Text(tr('Needs an Anthropic API key (Settings)')),
+                enabled: canWrite,
+                onTap: () => Navigator.pop(context, 'story'),
+              ),
+            if (m.story != null)
+              ListTile(
+                leading: const Icon(Icons.notes),
+                title: Text(tr('Remove place description')),
+                onTap: () => Navigator.pop(context, 'nostory'),
+              ),
+            if (m.place != null)
+              ListTile(
+                leading: const Icon(Icons.map_outlined),
+                title: Text(tr('Show on map')),
+                onTap: () => Navigator.pop(context, 'map'),
+              ),
             ListTile(
-              leading: const Icon(Icons.notes),
-              title: const Text('Remove place description'),
-              onTap: () => Navigator.pop(context, 'nostory'),
+              leading: const Icon(Icons.bookmark_remove_outlined),
+              title: Text(tr('Dissolve moment (keep photos)')),
+              onTap: () => Navigator.pop(context, 'dissolve'),
             ),
-          if (m.place != null)
-            ListTile(
-              leading: const Icon(Icons.map_outlined),
-              title: const Text('Show on map'),
-              onTap: () => Navigator.pop(context, 'map'),
-            ),
-          ListTile(
-            leading: const Icon(Icons.bookmark_remove_outlined),
-            title: const Text('Dissolve moment (keep photos)'),
-            onTap: () => Navigator.pop(context, 'dissolve'),
-          ),
-        ]),
+          ],
+        ),
       ),
     );
     if (!mounted) return;
@@ -346,9 +360,9 @@ class _EventScreenState extends State<EventScreen> {
     final n = _selected.length;
     final ok = await confirmDialog(
       context,
-      title: 'Remove $n photo${n == 1 ? '' : 's'}?',
-      message: 'They will be removed from this album. Originals in your gallery are not affected.',
-      action: 'Remove',
+      title: trn('Remove {n} photo?', 'Remove {n} photos?', n),
+      message: tr('They will be removed from this album. Originals in your gallery are not affected.'),
+      action: tr('Remove'),
     );
     if (!ok || !mounted) return;
     final ids = {..._selected};
@@ -368,12 +382,78 @@ class _EventScreenState extends State<EventScreen> {
         e.coverPhotoId = _selectedPhotos(e).first.id;
       case 'caption':
         final p = _selectedPhotos(e).first;
-        final text = await editTextDialog(context, title: 'Caption', initial: p.caption, hint: 'Say something about this photo');
+        final text = await editTextDialog(
+          context,
+          title: tr('Caption'),
+          initial: p.caption,
+          hint: tr('Say something about this photo'),
+        );
         if (text == null || !mounted) return;
         p.caption = text;
+      case 'size':
+        final photos = _selectedPhotos(e);
+        final current = photos.map((p) => p.size).toSet();
+        final choice = await _chooseSize(
+          current.length == 1 ? current.single : PhotoSize.normal,
+          automatic: current.length == 1 && current.single == null,
+        );
+        if (choice == null || !mounted) return;
+        for (final p in photos) {
+          p.size = choice.$1;
+        }
     }
     _clearSelection();
     await _persist(e);
+  }
+
+  /// Asks how much room photos should get. Returns (size, ) with null size
+  /// for automatic, or null when cancelled.
+  Future<(PhotoSize?,)?> _chooseSize(PhotoSize? current, {required bool automatic}) {
+    return showModalBottomSheet<(PhotoSize?,)>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
+                child: Text(tr('Size in the collage'), style: Theme.of(context).textTheme.titleLarge),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+                child: Text(
+                  tr('The layout gives these photos more or less room where it can.'),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.auto_awesome_outlined),
+                title: Text(tr('Automatic')),
+                subtitle: Text(tr('Carousels a bit larger, other photos normal')),
+                trailing: automatic ? const Icon(Icons.check) : null,
+                onTap: () => Navigator.pop(context, (null,)),
+              ),
+              for (final s in PhotoSize.values)
+                ListTile(
+                  leading: Icon(switch (s) {
+                    PhotoSize.small => Icons.photo_size_select_small,
+                    PhotoSize.normal => Icons.crop_square,
+                    PhotoSize.large => Icons.photo_size_select_large,
+                    PhotoSize.full => Icons.panorama_wide_angle_outlined,
+                  }),
+                  title: Text(s.label),
+                  subtitle: s == PhotoSize.full ? Text(tr('A band of its own across the whole width')) : null,
+                  trailing: !automatic && s == current ? const Icon(Icons.check) : null,
+                  onTap: () => Navigator.pop(context, (s,)),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   List<Photo> _selectedPhotos(AlbumEvent e) => e.photos.where((p) => _selected.contains(p.id)).toList();
@@ -398,9 +478,11 @@ class _EventScreenState extends State<EventScreen> {
         case PickedFolder(:final folder):
           final result = await repo.linkFolder(e, folder);
           if (!mounted) return;
-          _snack(result == null || result.isEmpty
-              ? 'Linked “${folder.name}”'
-              : 'Linked “${folder.name}” · $result');
+          _snack(
+            result == null || result.isEmpty
+                ? tr('Linked “{name}”', {'name': folder.name})
+                : '${tr('Linked “{name}”', {'name': folder.name})} · $result',
+          );
           return;
       }
     } else {
@@ -411,10 +493,15 @@ class _EventScreenState extends State<EventScreen> {
     }
     if (!mounted) return;
     final newStacks = e.stacks.length - stacksBefore;
-    _snack([
-      failed == 0 ? 'Added $count photo${count == 1 ? '' : 's'}' : 'Added ${count - failed}, $failed could not be read',
-      if (newStacks > 0) 'grouped similar shots into $newStacks carousel${newStacks == 1 ? '' : 's'}',
-    ].join(' · '));
+    _snack(
+      [
+        failed == 0
+            ? trn('Added {n} photo', 'Added {n} photos', count)
+            : tr('Added {added}, {failed} could not be read', {'added': count - failed, 'failed': failed}),
+        if (newStacks > 0)
+          trn('grouped similar shots into {n} carousel', 'grouped similar shots into {n} carousels', newStacks),
+      ].join(' · '),
+    );
   }
 
   /// Brings the album up to date with its linked gallery folders.
@@ -424,9 +511,14 @@ class _EventScreenState extends State<EventScreen> {
     final result = await AlbumScope.read(context).syncFolders(e, force: force);
     if (!mounted || result == null) return;
     if (!result.isEmpty) {
-      _snack('Synced ${e.linkedFolders.map((l) => '“${l.name}”').join(', ')}: $result');
+      _snack(
+        tr('Synced {names}: {result}', {
+          'names': e.linkedFolders.map((l) => '“${l.name}”').join(', '),
+          'result': result,
+        }),
+      );
     } else if (force) {
-      _snack('Up to date');
+      _snack(tr('Up to date'));
     }
   }
 
@@ -443,13 +535,15 @@ class _EventScreenState extends State<EventScreen> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-                child: Text('Linked folders', style: Theme.of(context).textTheme.titleLarge),
+                child: Text(tr('Linked folders'), style: Theme.of(context).textTheme.titleLarge),
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
                 child: Text(
-                  'New photos in these folders are added when you open the album; '
-                  'photos deleted from them are removed. Unlinking keeps the photos.',
+                  tr(
+                    'New photos in these folders are added when you open the album; '
+                    'photos deleted from them are removed. Unlinking keeps the photos.',
+                  ),
                   style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ),
@@ -457,20 +551,26 @@ class _EventScreenState extends State<EventScreen> {
                 ListTile(
                   leading: const Icon(Icons.folder_special_outlined),
                   title: Text(l.name),
-                  subtitle: Text('${e.photos.where((p) => p.folderId == l.id).length} photos in this album'),
+                  subtitle: Text(
+                    trn(
+                      '{n} photo in this album',
+                      '{n} photos in this album',
+                      e.photos.where((p) => p.folderId == l.id).length,
+                    ),
+                  ),
                   trailing: TextButton(
                     onPressed: () async {
                       await repo.unlinkFolder(e, l.id);
                       setSheet(() {});
                       if (e.linkedFolders.isEmpty && context.mounted) Navigator.pop(context);
                     },
-                    child: const Text('Unlink'),
+                    child: Text(tr('Unlink')),
                   ),
                 ),
               if (e.linkedFolders.isNotEmpty)
                 ListTile(
                   leading: const Icon(Icons.sync),
-                  title: const Text('Sync now'),
+                  title: Text(tr('Sync now')),
                   onTap: () {
                     Navigator.pop(context);
                     _syncFolders(force: true);
@@ -501,9 +601,9 @@ class _EventScreenState extends State<EventScreen> {
   Future<void> _editDayNote(AlbumEvent e, DayView day) async {
     final text = await editTextDialog(
       context,
-      title: 'Note for ${DateFormat('EEEE, d MMMM').format(day.date)}',
+      title: tr('Note for {day}', {'day': DateFormat(tr('EEEE, d MMMM')).format(day.date)}),
       initial: e.dayNotes[day.key] ?? '',
-      hint: 'What happened that day?',
+      hint: tr('What happened that day?'),
     );
     if (text == null || !mounted) return;
     if (text.isEmpty) {
@@ -528,15 +628,18 @@ class _EventScreenState extends State<EventScreen> {
   Future<void> _dissolveMoment(AlbumEvent e, Moment m) async {
     e.dissolveMoment(m);
     await _persist(e);
-    _snack('Moment “${m.title}” removed — its photos stay in the album');
+    _snack(tr('Moment “{title}” removed — its photos stay in the album', {'title': m.title}));
   }
 
   Future<void> _delete(AlbumEvent e) async {
     final ok = await confirmDialog(
       context,
-      title: 'Delete "${e.title}"?',
-      message: 'The album and its ${e.photos.length} photos will be removed from this app. '
-          'Originals in your gallery are not affected.',
+      title: tr('Delete “{title}”?', {'title': e.title}),
+      message: trn(
+        'The album and its {n} photo will be removed from this app. Originals in your gallery are not affected.',
+        'The album and its {n} photos will be removed from this app. Originals in your gallery are not affected.',
+        e.photos.length,
+      ),
     );
     if (!ok || !mounted) return;
     Navigator.pop(context);
@@ -581,95 +684,97 @@ class _EventScreenState extends State<EventScreen> {
       },
       child: Theme(
         data: style.themeData,
-        child: Builder(builder: (context) {
-          return Scaffold(
-            backgroundColor: s.surface,
-            body: NotificationListener<ScrollUpdateNotification>(
-              onNotification: (n) {
-                if (journeyMap && n.depth == 0) _onScroll();
-                return false;
-              },
-              child: CustomScrollView(
-              controller: _scroll,
-              slivers: [
-                _header(context, e, style, geo, journeyMap),
-                DecoratedSliver(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [s.surface, tints.firstOrNull ?? s.surface],
-                    ),
-                  ),
-                  sliver: SliverToBoxAdapter(
-                    child: _Constrained(
-                      child: _InfoSection(
-                        event: e,
-                        style: style,
-                        geo: journeyMap ? null : geo,
-                        onOpenMap: () => openAlbumMap(context, e),
+        child: Builder(
+          builder: (context) {
+            return Scaffold(
+              backgroundColor: s.surface,
+              body: NotificationListener<ScrollUpdateNotification>(
+                onNotification: (n) {
+                  if (journeyMap && n.depth == 0) _onScroll();
+                  return false;
+                },
+                child: CustomScrollView(
+                  controller: _scroll,
+                  slivers: [
+                    _header(context, e, style, geo, journeyMap),
+                    DecoratedSliver(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [s.surface, tints.firstOrNull ?? s.surface],
+                        ),
                       ),
-                    ),
-                  ),
-                ),
-                if (e.photos.isEmpty)
-                  SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: _EmptyAlbum(onAdd: progress == null ? _addPhotos : null),
-                  ),
-                for (var i = 0; i < days.length; i++)
-                  DecoratedSliver(
-                    key: ValueKey(days[i].key),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [tints[i], i + 1 < tints.length ? tints[i + 1] : s.surface],
-                      ),
-                    ),
-                    sliver: _DaySliver(
-                      event: e,
-                      style: style,
-                      day: days[i],
-                      dayNumber: days[i].date.difference(firstDay!).inDays + 1,
-                      interaction: interaction,
-                      airy: airy,
-                      onEditNote: () => _editDayNote(e, days[i]),
-                      onMomentActions: (m) => _momentActions(e, m),
-                      onWriteStory: (m) => _guardStory(() => AlbumScope.read(context).writeStory(e, m)),
-                    ),
-                  ),
-                if (e.photos.isNotEmpty)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 24, 16, 48),
-                      child: Center(
-                        child: FilledButton.tonalIcon(
-                          onPressed: progress == null ? _addPhotos : null,
-                          icon: const Icon(Icons.add_photo_alternate_outlined),
-                          label: const Text('Add more photos'),
+                      sliver: SliverToBoxAdapter(
+                        child: _Constrained(
+                          child: _InfoSection(
+                            event: e,
+                            style: style,
+                            geo: journeyMap ? null : geo,
+                            onOpenMap: () => openAlbumMap(context, e),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-              ],
-            ),
-            ),
-            bottomNavigationBar: _selected.isNotEmpty
-                ? _SelectionBar(
-                    event: e,
-                    selected: _selected,
-                    onClose: _clearSelection,
-                    onCarousel: () => _groupAsCarousel(e),
-                    onMoment: () => _addToMoment(e),
-                    onRemove: () => _removeSelected(e),
-                    onMenu: (a) => _selectionMenu(e, a),
-                  )
-                : progress == null
-                    ? null
-                    : _ProgressBar(progress: progress),
-          );
-        }),
+                    if (e.photos.isEmpty)
+                      SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: _EmptyAlbum(onAdd: progress == null ? _addPhotos : null),
+                      ),
+                    for (var i = 0; i < days.length; i++)
+                      DecoratedSliver(
+                        key: ValueKey(days[i].key),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [tints[i], i + 1 < tints.length ? tints[i + 1] : s.surface],
+                          ),
+                        ),
+                        sliver: _DaySliver(
+                          event: e,
+                          style: style,
+                          day: days[i],
+                          dayNumber: days[i].date.difference(firstDay!).inDays + 1,
+                          interaction: interaction,
+                          airy: airy,
+                          onEditNote: () => _editDayNote(e, days[i]),
+                          onMomentActions: (m) => _momentActions(e, m),
+                          onWriteStory: (m) => _guardStory(() => AlbumScope.read(context).writeStory(e, m)),
+                        ),
+                      ),
+                    if (e.photos.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 24, 16, 48),
+                          child: Center(
+                            child: FilledButton.tonalIcon(
+                              onPressed: progress == null ? _addPhotos : null,
+                              icon: const Icon(Icons.add_photo_alternate_outlined),
+                              label: Text(tr('Add more photos')),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              bottomNavigationBar: _selected.isNotEmpty
+                  ? _SelectionBar(
+                      event: e,
+                      selected: _selected,
+                      onClose: _clearSelection,
+                      onCarousel: () => _groupAsCarousel(e),
+                      onMoment: () => _addToMoment(e),
+                      onRemove: () => _removeSelected(e),
+                      onMenu: (a) => _selectionMenu(e, a),
+                    )
+                  : progress == null
+                  ? null
+                  : _ProgressBar(progress: progress),
+            );
+          },
+        ),
       ),
     );
   }
@@ -683,7 +788,7 @@ class _EventScreenState extends State<EventScreen> {
     final actions = <Widget>[
       if (!geo.isEmpty)
         IconButton.filledTonal(
-          tooltip: journeyMap ? 'Hide map' : 'Show map',
+          tooltip: journeyMap ? tr('Hide map') : tr('Show map'),
           isSelected: journeyMap,
           onPressed: () {
             e.showJourneyMap = !e.showJourneyMap;
@@ -694,12 +799,12 @@ class _EventScreenState extends State<EventScreen> {
           selectedIcon: const Icon(Icons.map),
         ),
       IconButton.filledTonal(
-        tooltip: 'Add photos',
+        tooltip: tr('Add photos'),
         onPressed: busy ? null : _addPhotos,
         icon: const Icon(Icons.add_photo_alternate_outlined),
       ),
       IconButton.filledTonal(
-        tooltip: 'Theme & colours',
+        tooltip: tr('Theme & colours'),
         onPressed: () => showThemePicker(context, e),
         icon: const Icon(Icons.palette_outlined),
       ),
@@ -725,21 +830,29 @@ class _EventScreenState extends State<EventScreen> {
           }
         },
         itemBuilder: (_) => [
-          const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit details'))),
-          if (e.photos.isNotEmpty)
-            const PopupMenuItem(value: 'select', child: ListTile(leading: Icon(Icons.checklist), title: Text('Select photos'))),
-          CheckedPopupMenuItem(
-            value: 'autostack',
-            checked: e.autoStack,
-            child: const Text('Group similar photos'),
+          PopupMenuItem(
+            value: 'edit',
+            child: ListTile(leading: Icon(Icons.edit_outlined), title: Text(tr('Edit details'))),
           ),
-          const PopupMenuItem(value: 'shuffle', child: ListTile(leading: Icon(Icons.shuffle), title: Text('Shuffle layout'))),
-          if (e.linkedFolders.isNotEmpty)
-            const PopupMenuItem(
-              value: 'folders',
-              child: ListTile(leading: Icon(Icons.folder_special_outlined), title: Text('Linked folders')),
+          if (e.photos.isNotEmpty)
+            PopupMenuItem(
+              value: 'select',
+              child: ListTile(leading: Icon(Icons.checklist), title: Text(tr('Select photos'))),
             ),
-          const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline), title: Text('Delete album'))),
+          CheckedPopupMenuItem(value: 'autostack', checked: e.autoStack, child: Text(tr('Group similar photos'))),
+          PopupMenuItem(
+            value: 'shuffle',
+            child: ListTile(leading: Icon(Icons.shuffle), title: Text(tr('Shuffle layout'))),
+          ),
+          if (e.linkedFolders.isNotEmpty)
+            PopupMenuItem(
+              value: 'folders',
+              child: ListTile(leading: Icon(Icons.folder_special_outlined), title: Text(tr('Linked folders'))),
+            ),
+          PopupMenuItem(
+            value: 'delete',
+            child: ListTile(leading: Icon(Icons.delete_outline), title: Text(tr('Delete album'))),
+          ),
         ],
       ),
       const SizedBox(width: 8),
@@ -766,11 +879,8 @@ class _EventScreenState extends State<EventScreen> {
               geo: geo,
               current: _currentVisit,
               onTapVisit: (v) => _scrollToPhotos([for (final p in v.photos) p.id]),
-              onOpen: () => openAlbumMap(
-                context,
-                e,
-                focus: _currentVisit == null ? null : geo.visits[_currentVisit!].center,
-              ),
+              onOpen: () =>
+                  openAlbumMap(context, e, focus: _currentVisit == null ? null : geo.visits[_currentVisit!].center),
             ),
             Positioned(
               left: 12,
@@ -799,7 +909,10 @@ class _EventScreenState extends State<EventScreen> {
               right: 8,
               bottom: 4,
               child: IgnorePointer(
-                child: Text('© OpenStreetMap', style: TextStyle(fontSize: 9.5, color: s.onSurface.withValues(alpha: 0.7))),
+                child: Text(
+                  '© OpenStreetMap',
+                  style: TextStyle(fontSize: 9.5, color: s.onSurface.withValues(alpha: 0.7)),
+                ),
               ),
             ),
           ],
@@ -859,11 +972,14 @@ class _Constrained extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: _maxContentWidth),
-          child: Padding(padding: const EdgeInsets.symmetric(horizontal: _sidePadding), child: child),
-        ),
-      );
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: _maxContentWidth),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: _sidePadding),
+        child: child,
+      ),
+    ),
+  );
 }
 
 class _InfoSection extends StatelessWidget {
@@ -880,7 +996,7 @@ class _InfoSection extends StatelessWidget {
     final facts = [
       if (event.location.isNotEmpty) event.location,
       if (event.photos.isNotEmpty) formatDateRange(event.start, event.end),
-      if (event.photos.isNotEmpty) '${event.photos.length} photos',
+      if (event.photos.isNotEmpty) trn('{n} photo', '{n} photos', event.photos.length),
     ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
@@ -888,7 +1004,10 @@ class _InfoSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (facts.isNotEmpty)
-            Text(facts.join('  ·  '), style: t.textTheme.bodyMedium?.copyWith(color: s.onSurfaceVariant, letterSpacing: 0.2)),
+            Text(
+              facts.join('  ·  '),
+              style: t.textTheme.bodyMedium?.copyWith(color: s.onSurfaceVariant, letterSpacing: 0.2),
+            ),
           if (event.description.isNotEmpty) ...[
             const SizedBox(height: 14),
             Text(event.description, style: t.textTheme.bodyLarge?.copyWith(height: 1.55, color: s.onSurface)),
@@ -900,7 +1019,7 @@ class _InfoSection extends StatelessWidget {
           if (event.photos.length >= 4 && event.moments.isEmpty) ...[
             const SizedBox(height: 14),
             Text(
-              'Tip: long-press photos to group them into a moment or carousel. Tap a day\'s title to add a note.',
+              tr('Tip: long-press photos to group them into a moment or carousel. Tap a day\'s title to add a note.'),
               style: t.textTheme.bodySmall?.copyWith(color: s.onSurfaceVariant),
             ),
           ],
@@ -938,62 +1057,76 @@ class _DaySliver extends StatelessWidget {
     final gap = airy ? 10.0 : _gap;
     // Extra breathing room between collage bands in the airy layout.
     final bandSpacing = airy ? 8.0 : 0.0;
-    return SliverLayoutBuilder(builder: (context, constraints) {
-      final cross = constraints.crossAxisExtent;
-      final outer = math.max(0.0, (cross - _maxContentWidth) / 2);
-      // Collage cells are inset by half a gap, so let the collage overhang
-      // the text column by that much to keep photo edges aligned with text.
-      final loosePad = outer + _sidePadding - gap / 2;
-      final cardMargin = outer + _sidePadding - 4;
-      final cardInner = 10 - gap / 2;
-      final daySeed = event.layoutSeed ^ _stableHash(day.key);
+    return SliverLayoutBuilder(
+      builder: (context, constraints) {
+        final cross = constraints.crossAxisExtent;
+        final outer = math.max(0.0, (cross - _maxContentWidth) / 2);
+        // Collage cells are inset by half a gap, so let the collage overhang
+        // the text column by that much to keep photo edges aligned with text.
+        final loosePad = outer + _sidePadding - gap / 2;
+        final cardMargin = outer + _sidePadding - 4;
+        final cardInner = 10 - gap / 2;
+        final daySeed = event.layoutSeed ^ _stableHash(day.key);
 
-      SliverList collageRows(List<AlbumItem> items, double width, int seed) {
-        final blocks = buildCollage([for (final i in items) i.aspect], width, seed: seed, airy: airy);
-        return SliverList.builder(
-          itemCount: blocks.length,
-          itemBuilder: (context, i) => Padding(
-            padding: EdgeInsets.only(bottom: i == blocks.length - 1 ? 0 : bandSpacing),
-            child: CollageBlockView(block: blocks[i], items: items, interaction: interaction, gap: gap),
-          ),
-        );
-      }
+        SliverList collageRows(List<AlbumItem> items, double width, int seed) {
+          final blocks = buildCollage(
+            [for (final i in items) i.aspect],
+            width,
+            seed: seed,
+            airy: airy,
+            sizes: [for (final i in items) i.size],
+          );
+          return SliverList.builder(
+            itemCount: blocks.length,
+            itemBuilder: (context, i) => Padding(
+              padding: EdgeInsets.only(bottom: i == blocks.length - 1 ? 0 : bandSpacing),
+              child: CollageBlockView(block: blocks[i], items: items, interaction: interaction, gap: gap),
+            ),
+          );
+        }
 
-      return SliverMainAxisGroup(slivers: [
-        SliverToBoxAdapter(
-          child: _Constrained(child: _DayHeader(event: event, day: day, dayNumber: dayNumber, onEditNote: onEditNote)),
-        ),
-        for (final (index, block) in day.blocks.indexed)
-          switch (block) {
-            LooseRun() => SliverPadding(
-                padding: EdgeInsets.symmetric(horizontal: loosePad, vertical: airy ? 6 : 4),
-                sliver: collageRows(block.items, cross - 2 * loosePad, daySeed ^ (index * 7919)),
+        return SliverMainAxisGroup(
+          slivers: [
+            SliverToBoxAdapter(
+              child: _Constrained(
+                child: _DayHeader(event: event, day: day, dayNumber: dayNumber, onEditNote: onEditNote),
               ),
-            MomentBlock() => SliverPadding(
-                padding: EdgeInsets.fromLTRB(cardMargin, airy ? 18 : 10, cardMargin, airy ? 18 : 10),
-                sliver: DecoratedSliver(
-                  decoration: BoxDecoration(
-                    color: style.momentTint(block.photos),
-                    borderRadius: BorderRadius.circular(22),
-                  ),
-                  sliver: SliverPadding(
-                    padding: EdgeInsets.fromLTRB(cardInner, 0, cardInner, cardInner + 2),
-                    sliver: SliverMainAxisGroup(slivers: [
-                      SliverToBoxAdapter(
-                        child: _MomentHeader(
-                          block: block,
-                          onTap: () => onMomentActions(block.moment),
-                          onWriteStory: () => onWriteStory(block.moment),
-                        ),
+            ),
+            for (final (index, block) in day.blocks.indexed)
+              switch (block) {
+                LooseRun() => SliverPadding(
+                  padding: EdgeInsets.symmetric(horizontal: loosePad, vertical: airy ? 6 : 4),
+                  sliver: collageRows(block.items, cross - 2 * loosePad, daySeed ^ (index * 7919)),
+                ),
+                MomentBlock() => SliverPadding(
+                  padding: EdgeInsets.fromLTRB(cardMargin, airy ? 18 : 10, cardMargin, airy ? 18 : 10),
+                  sliver: DecoratedSliver(
+                    decoration: BoxDecoration(
+                      color: style.momentTint(block.photos),
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                    sliver: SliverPadding(
+                      padding: EdgeInsets.fromLTRB(cardInner, 0, cardInner, cardInner + 2),
+                      sliver: SliverMainAxisGroup(
+                        slivers: [
+                          SliverToBoxAdapter(
+                            child: _MomentHeader(
+                              block: block,
+                              onTap: () => onMomentActions(block.moment),
+                              onWriteStory: () => onWriteStory(block.moment),
+                            ),
+                          ),
+                          collageRows(block.items, cross - 2 * (cardMargin + cardInner), _stableHash(block.moment.id)),
+                        ],
                       ),
-                      collageRows(block.items, cross - 2 * (cardMargin + cardInner), _stableHash(block.moment.id)),
-                    ]),
+                    ),
                   ),
                 ),
-              ),
-          },
-      ]);
-    });
+              },
+          ],
+        );
+      },
+    );
   }
 }
 
@@ -1021,11 +1154,15 @@ class _DayHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Day $dayNumber',
-                style: t.textTheme.headlineMedium?.copyWith(color: s.primary, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+                tr('Day {n}', {'n': dayNumber}),
+                style: t.textTheme.headlineMedium?.copyWith(
+                  color: s.primary,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.5,
+                ),
               ),
               Text(
-                [DateFormat('EEEE, d MMMM').format(day.date), ?place].join('  ·  '),
+                [DateFormat(tr('EEEE, d MMMM')).format(day.date), ?place].join('  ·  '),
                 style: t.textTheme.titleSmall?.copyWith(color: s.onSurfaceVariant),
               ),
               if (note != null)
@@ -1058,8 +1195,8 @@ class _MomentHeader extends StatelessWidget {
     final first = photos.first.takenAt, last = photos.last.takenAt;
     final multiDay = dayKey(first) != dayKey(last);
     final time = [
-      (multiDay ? DateFormat('d MMM, HH:mm') : hm).format(first),
-      if (last.difference(first).inMinutes >= 1) (multiDay ? DateFormat('d MMM, HH:mm') : hm).format(last),
+      (multiDay ? DateFormat(tr('d MMM, HH:mm')) : hm).format(first),
+      if (last.difference(first).inMinutes >= 1) (multiDay ? DateFormat(tr('d MMM, HH:mm')) : hm).format(last),
     ].join(' – ');
     final loading = repo.storyLoading.contains(m.id);
     final offerStory = m.place != null && m.story == null && !loading && repo.settings.canWriteStories;
@@ -1086,11 +1223,16 @@ class _MomentHeader extends StatelessWidget {
             if (loading)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
-                child: Row(children: [
-                  const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2)),
-                  const SizedBox(width: 10),
-                  Text('Looking into ${m.place!.name}…', style: t.textTheme.bodySmall?.copyWith(color: s.onSurfaceVariant)),
-                ]),
+                child: Row(
+                  children: [
+                    const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                    const SizedBox(width: 10),
+                    Text(
+                      tr('Looking into {place}…', {'place': m.place!.name}),
+                      style: t.textTheme.bodySmall?.copyWith(color: s.onSurfaceVariant),
+                    ),
+                  ],
+                ),
               )
             else if (m.story != null)
               _StoryText(story: m.story!)
@@ -1101,7 +1243,7 @@ class _MomentHeader extends StatelessWidget {
                   style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact),
                   onPressed: onWriteStory,
                   icon: const Icon(Icons.auto_awesome_outlined, size: 16),
-                  label: Text('About ${m.place!.name}'),
+                  label: Text(tr('About {place}', {'place': m.place!.name})),
                 ),
               ),
           ],
@@ -1130,17 +1272,26 @@ class _StoryText extends StatelessWidget {
       padding: const EdgeInsets.only(top: 10),
       child: Container(
         padding: const EdgeInsets.only(left: 12),
-        decoration: BoxDecoration(border: Border(left: BorderSide(color: s.primary.withValues(alpha: 0.5), width: 2))),
+        decoration: BoxDecoration(
+          border: Border(left: BorderSide(color: s.primary.withValues(alpha: 0.5), width: 2)),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               story.text,
-              style: t.textTheme.bodyMedium?.copyWith(fontStyle: FontStyle.italic, height: 1.5, color: s.onSurface.withValues(alpha: 0.85)),
+              style: t.textTheme.bodyMedium?.copyWith(
+                fontStyle: FontStyle.italic,
+                height: 1.5,
+                color: s.onSurface.withValues(alpha: 0.85),
+              ),
             ),
             const SizedBox(height: 4),
             Text(
-              ['AI-written', if (domains.isNotEmpty) 'from ${domains.join(', ')}'].join(' '),
+              [
+                tr('AI-written'),
+                if (domains.isNotEmpty) tr('from {sources}', {'sources': domains.join(', ')}),
+              ].join(' '),
               style: t.textTheme.labelSmall?.copyWith(color: s.onSurfaceVariant.withValues(alpha: 0.8)),
             ),
           ],
@@ -1188,38 +1339,62 @@ class _SelectionBar extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(children: [
-                IconButton(tooltip: 'Cancel', onPressed: onClose, icon: const Icon(Icons.close)),
-                Text('$n selected', style: Theme.of(context).textTheme.titleMedium),
-                const Spacer(),
-                PopupMenuButton<String>(
-                  tooltip: 'More',
-                  onSelected: onMenu,
-                  itemBuilder: (_) => [
-                    if (n == 1)
-                      const PopupMenuItem(value: 'caption', child: ListTile(leading: Icon(Icons.short_text), title: Text('Caption'))),
-                    if (single)
-                      const PopupMenuItem(value: 'cover', child: ListTile(leading: Icon(Icons.star_outline), title: Text('Use as album cover'))),
-                    const PopupMenuItem(
-                      value: 'location',
-                      child: ListTile(leading: Icon(Icons.add_location_alt_outlined), title: Text('Set location')),
-                    ),
-                    if (anyStacked)
-                      const PopupMenuItem(value: 'ungroup', child: ListTile(leading: Icon(Icons.burst_mode_outlined), title: Text('Ungroup carousel'))),
-                    if (anyInMoment)
-                      const PopupMenuItem(
-                        value: 'unmoment',
-                        child: ListTile(leading: Icon(Icons.bookmark_remove_outlined), title: Text('Take out of moment')),
+              Row(
+                children: [
+                  IconButton(tooltip: tr('Cancel'), onPressed: onClose, icon: const Icon(Icons.close)),
+                  Text(tr('{n} selected', {'n': n}), style: Theme.of(context).textTheme.titleMedium),
+                  const Spacer(),
+                  PopupMenuButton<String>(
+                    tooltip: tr('More'),
+                    onSelected: onMenu,
+                    itemBuilder: (_) => [
+                      PopupMenuItem(
+                        value: 'size',
+                        child: ListTile(leading: Icon(Icons.photo_size_select_large), title: Text(tr('Size'))),
                       ),
-                  ],
-                ),
-              ]),
+                      if (single)
+                        PopupMenuItem(
+                          value: 'cover',
+                          child: ListTile(leading: Icon(Icons.star_outline), title: Text(tr('Use as album cover'))),
+                        ),
+                      PopupMenuItem(
+                        value: 'location',
+                        child: ListTile(
+                          leading: Icon(Icons.add_location_alt_outlined),
+                          title: Text(tr('Set location')),
+                        ),
+                      ),
+                      if (anyStacked)
+                        PopupMenuItem(
+                          value: 'ungroup',
+                          child: ListTile(
+                            leading: Icon(Icons.burst_mode_outlined),
+                            title: Text(tr('Ungroup carousel')),
+                          ),
+                        ),
+                      if (anyInMoment)
+                        PopupMenuItem(
+                          value: 'unmoment',
+                          child: ListTile(
+                            leading: Icon(Icons.bookmark_remove_outlined),
+                            title: Text(tr('Take out of moment')),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  _BarAction(icon: Icons.bookmark_add_outlined, label: 'Moment', onTap: onMoment),
-                  _BarAction(icon: Icons.burst_mode_outlined, label: 'Carousel', onTap: n >= 2 ? onCarousel : null),
-                  _BarAction(icon: Icons.delete_outline, label: 'Remove', onTap: onRemove),
+                  _BarAction(icon: Icons.bookmark_add_outlined, label: tr('Moment'), onTap: onMoment),
+                  _BarAction(icon: Icons.burst_mode_outlined, label: tr('Carousel'), onTap: n >= 2 ? onCarousel : null),
+                  _BarAction(
+                    icon: Icons.short_text,
+                    label: tr('Caption'),
+                    onTap: n == 1 ? () => onMenu('caption') : null,
+                  ),
+                  _BarAction(icon: Icons.delete_outline, label: tr('Remove'), onTap: onRemove),
                 ],
               ),
             ],
@@ -1240,16 +1415,27 @@ class _BarAction extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = Theme.of(context).colorScheme;
     final color = onTap == null ? s.onSurface.withValues(alpha: 0.38) : s.onSurface;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, color: color),
-          const SizedBox(height: 2),
-          Text(label, style: TextStyle(color: color, fontSize: 12.5)),
-        ]),
+    // Equal shares of the bar, so longer (e.g. German) labels still fit.
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: color),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: color, fontSize: 12.5),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1261,23 +1447,23 @@ class _ProgressBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-        color: Theme.of(context).colorScheme.surfaceContainerHigh,
-        child: SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Arranging photos… ${progress.$1} of ${progress.$2}'),
-                const SizedBox(height: 8),
-                LinearProgressIndicator(value: progress.$2 == 0 ? null : progress.$1 / progress.$2),
-              ],
-            ),
-          ),
+    color: Theme.of(context).colorScheme.surfaceContainerHigh,
+    child: SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(tr('Arranging photos… {done} of {total}', {'done': progress.$1, 'total': progress.$2})),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(value: progress.$2 == 0 ? null : progress.$1 / progress.$2),
+          ],
         ),
-      );
+      ),
+    ),
+  );
 }
 
 class _EmptyAlbum extends StatelessWidget {
@@ -1295,15 +1481,19 @@ class _EmptyAlbum extends StatelessWidget {
           children: [
             Icon(Icons.collections_outlined, size: 72, color: t.colorScheme.primary),
             const SizedBox(height: 16),
-            Text('No photos yet', style: t.textTheme.titleLarge),
+            Text(tr('No photos yet'), style: t.textTheme.titleLarge),
             const SizedBox(height: 8),
             Text(
-              'Add photos and they will be grouped by day and arranged into collages automatically.',
+              tr('Add photos and they will be grouped by day and arranged into collages automatically.'),
               textAlign: TextAlign.center,
               style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 20),
-            FilledButton.icon(onPressed: onAdd, icon: const Icon(Icons.add_photo_alternate_outlined), label: const Text('Add photos')),
+            FilledButton.icon(
+              onPressed: onAdd,
+              icon: const Icon(Icons.add_photo_alternate_outlined),
+              label: Text(tr('Add photos')),
+            ),
           ],
         ),
       ),

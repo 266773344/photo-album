@@ -6,10 +6,11 @@ each album gets background colours derived from its own photos.
 
 ## Features
 
-- **Home screen** with one card per album (cover photo, place, dates, and the
-  album's signature colours: vivid colours typical of this trip, with sky,
-  stone and foliage tones discounted and colours common to all your albums
-  ranked lower, `signatureColors` in `lib/theme/palette.dart`).
+- **Home screen** with one card per album (cover photo, place, dates). Each card
+  glows softly in the album's signature colour (vivid colours typical of this
+  trip; sky, stone and foliage tones discounted, colours common to all your
+  albums ranked lower, `signatureColors` in `lib/theme/palette.dart`); the page
+  background is faintly tinted with the average of all albums.
 - **Automatic collages** — `lib/layout/collage_layout.dart` builds each band of
   the collage as a row/column tree, so photos fit with no cropping. Layouts are
   seeded per album (stable between launches); *Shuffle layout* re-rolls them.
@@ -19,12 +20,15 @@ each album gets background colours derived from its own photos.
   scroll. You can override this with mood presets (Beach, Mountains, City, …),
   a custom colour, and light/dark mode.
 - **Grouped by day** using the EXIF capture date (falls back to file date).
+- **Photo sizes** — selection → *Size*: Small, Normal, Large or Full width
+  (a band of its own). The collage engine treats it as a strong preference;
+  carousels are Large unless set otherwise.
 - **Similar-photo carousels** — bursts and near-duplicates (perceptual dHash +
   palette check, only among photos taken within ~2 minutes) are combined into one
   swipeable collage cell showing the sharpest shot first
   (`lib/data/similarity.dart`). Toggle per album via *Group similar photos*.
 - **Selection mode** — long-press a photo, tap more, then: *Moment*, *Carousel*,
-  *Remove*, or (⋯) caption / cover / ungroup / take out of moment.
+  *Size*, *Remove*, or (⋯) caption / cover / ungroup / take out of moment.
 - **Moments** — optional titled chapters within a day ("Breakfast at Café Lua")
   with a note, shown as a tinted card where their first photo falls in the
   timeline. Photos don't have to belong to one (`lib/models/grouping.dart`).
@@ -51,7 +55,8 @@ each album gets background colours derived from its own photos.
   and show differently shaped photos whole on a blurred fill.
 - **Captions & notes** — album title/location/story, a note per day, and a
   caption per photo (long-press a photo).
-- **Fullscreen viewer** — swipe between photos, pinch or double-tap to zoom.
+- **Fullscreen viewer** — swipe between photos, pinch or double-tap to zoom. Tap beside the
+  photo to close it.
 - **Photos stay where they are (Android)** — an in-app gallery picker
   (`lib/screens/gallery_picker.dart`, grouped by day, opens on the album's dates)
   adds photos *by reference*: the app stores only a small preview (~250 KB) plus
@@ -60,6 +65,11 @@ each album gets background colours derived from its own photos.
 - **Linked folders** — "Add a whole folder" links a gallery folder to an album;
   new photos in it are added when the album opens, deleted ones removed
   (album menu → *Linked folders* to sync or unlink).
+- **English and German** — Settings → Language (or follow the phone). Texts go
+  through `tr()` with the German table in `lib/l10n/de.dart` (keyed by the English
+  text; `test/l10n_test.dart` fails if one is missing). Place names from
+  OpenStreetMap and AI place descriptions follow the language too; switching
+  re-names days and the automatic album place (places you named yourself stay).
 - **Local storage** — album data and previews in the app directory on Android,
   IndexedDB in the browser (where picked photos are copied, since a web page
   can't keep references to files).

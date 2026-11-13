@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import '../l10n/strings.dart';
+
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
@@ -58,7 +60,9 @@ class _PhotoViewerState extends State<PhotoViewer> {
     final fullWidth = math.min(3200, (math.max(size.width, size.height) * dpr).round());
 
     return Theme(
-      data: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: style.seed, brightness: Brightness.dark)),
+      data: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: style.seed, brightness: Brightness.dark),
+      ),
       child: Scaffold(
         backgroundColor: backdrop,
         extendBodyBehindAppBar: true,
@@ -70,12 +74,12 @@ class _PhotoViewerState extends State<PhotoViewer> {
                 actions: [
                   if (photo.hasLocation)
                     IconButton(
-                      tooltip: 'Show on map',
+                      tooltip: tr('Show on map'),
                       icon: const Icon(Icons.map_outlined),
                       onPressed: () => openAlbumMap(context, e, focus: LatLng(photo.lat!, photo.lng!)),
                     ),
                   IconButton(
-                    tooltip: 'Photo options',
+                    tooltip: tr('Photo options'),
                     icon: const Icon(Icons.more_vert),
                     onPressed: () async {
                       final deleted = await showPhotoActions(context, e, photo);
@@ -96,6 +100,7 @@ class _PhotoViewerState extends State<PhotoViewer> {
                 photo: e.photos[i],
                 fullWidth: fullWidth,
                 onTap: () => setState(() => _chrome = !_chrome),
+                onClose: () => Navigator.maybePop(context),
                 onZoomChanged: (z) {
                   if (z != _zoomed) setState(() => _zoomed = z);
                 },
@@ -124,11 +129,14 @@ class _PhotoViewerState extends State<PhotoViewer> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             if (photo.caption.isNotEmpty)
-                              Text(photo.caption, style: const TextStyle(color: Colors.white, fontSize: 17, height: 1.35)),
+                              Text(
+                                photo.caption,
+                                style: const TextStyle(color: Colors.white, fontSize: 17, height: 1.35),
+                              ),
                             const SizedBox(height: 4),
                             Text(
                               [
-                                DateFormat('EEEE, d MMMM y · HH:mm').format(photo.takenAt),
+                                DateFormat(tr('EEEE, d MMMM y · HH:mm')).format(photo.takenAt),
                                 ?(e.momentOf(photo.id)?.place?.name ?? e.dayPlaces[dayKey(photo.takenAt)]),
                               ].join('  ·  '),
                               style: const TextStyle(color: Colors.white70, fontSize: 13),
@@ -148,10 +156,21 @@ class _PhotoViewerState extends State<PhotoViewer> {
 }
 
 class _ZoomablePhoto extends StatefulWidget {
-  const _ZoomablePhoto({required this.photo, required this.fullWidth, required this.onTap, required this.onZoomChanged});
+  const _ZoomablePhoto({
+    required this.photo,
+    required this.fullWidth,
+    required this.onTap,
+    required this.onClose,
+    required this.onZoomChanged,
+  });
   final Photo photo;
   final int fullWidth;
+
+  /// Tap on the photo.
   final VoidCallback onTap;
+
+  /// Tap beside the photo.
+  final VoidCallback onClose;
   final ValueChanged<bool> onZoomChanged;
 
   @override
@@ -186,74 +205,90 @@ class _ZoomablePhotoState extends State<_ZoomablePhoto> {
     final repo = AlbumScope.read(context);
     final p = widget.photo;
     TapDownDetails? lastDown;
-    return GestureDetector(
-      onTap: widget.onTap,
-      onDoubleTapDown: (d) => lastDown = d,
-      onDoubleTap: () {
-        if (lastDown != null) _toggleZoom(lastDown!);
-      },
-      child: InteractiveViewer(
-        transformationController: _transform,
-        maxScale: 5,
-        onInteractionEnd: (_) => widget.onZoomChanged(_transform.value.getMaxScaleOnAxis() > 1.01),
-        child: Center(
-          child: Hero(
-            tag: 'photo_${p.id}',
-            child: AspectRatio(
-              aspectRatio: p.aspect,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  // Thumbnail shows instantly; the full-resolution original fades in on top.
-                  PhotoThumb(photo: p, radius: 0, fit: BoxFit.contain),
-                  Image(
-                    image: ResizeImage(
-                      // Referenced photos load from the device gallery, copied ones from storage.
-                      p.assetId != null && repo.gallery != null
-                          ? GalleryImage(
-                              repo.gallery!,
-                              p.assetId!,
-                              (widget.fullWidth * math.min(p.width, p.height) / math.max(p.width, p.height)).round(),
-                            )
-                          : StoredImage(repo, p.fullKey),
-                      width: widget.fullWidth,
-                      height: widget.fullWidth,
-                      policy: ResizeImagePolicy.fit,
-                    ),
-                    fit: BoxFit.contain,
-                    frameBuilder: (context, child, frame, sync) => AnimatedOpacity(
-                      opacity: frame == null && !sync ? 0 : 1,
-                      duration: const Duration(milliseconds: 250),
-                      child: child,
-                    ),
-                    errorBuilder: (_, _, _) => p.assetId == null
-                        ? const SizedBox.shrink()
-                        : const Align(
-                            alignment: Alignment.bottomCenter,
-                            child: Padding(
-                              padding: EdgeInsets.all(8),
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: Colors.black54,
-                                  borderRadius: BorderRadius.all(Radius.circular(12)),
-                                ),
+    return LayoutBuilder(
+      builder: (context, box) {
+        final size = box.biggest;
+        return GestureDetector(
+          // On the photo: show/hide the details. Beside it: close the viewer.
+          onTapUp: (d) {
+            final scene = _transform.toScene(d.localPosition);
+            final w = math.min(size.width, size.height * p.aspect), h = w / p.aspect;
+            final photoRect = Rect.fromCenter(center: size.center(Offset.zero), width: w, height: h);
+            if (photoRect.inflate(4).contains(scene)) {
+              widget.onTap();
+            } else {
+              widget.onClose();
+            }
+          },
+          onDoubleTapDown: (d) => lastDown = d,
+          onDoubleTap: () {
+            if (lastDown != null) _toggleZoom(lastDown!);
+          },
+          child: InteractiveViewer(
+            transformationController: _transform,
+            maxScale: 5,
+            onInteractionEnd: (_) => widget.onZoomChanged(_transform.value.getMaxScaleOnAxis() > 1.01),
+            child: Center(
+              child: Hero(
+                tag: 'photo_${p.id}',
+                child: AspectRatio(
+                  aspectRatio: p.aspect,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // Thumbnail shows instantly; the full-resolution original fades in on top.
+                      PhotoThumb(photo: p, radius: 0, fit: BoxFit.contain),
+                      Image(
+                        image: ResizeImage(
+                          // Referenced photos load from the device gallery, copied ones from storage.
+                          p.assetId != null && repo.gallery != null
+                              ? GalleryImage(
+                                  repo.gallery!,
+                                  p.assetId!,
+                                  (widget.fullWidth * math.min(p.width, p.height) / math.max(p.width, p.height))
+                                      .round(),
+                                )
+                              : StoredImage(repo, p.fullKey),
+                          width: widget.fullWidth,
+                          height: widget.fullWidth,
+                          policy: ResizeImagePolicy.fit,
+                        ),
+                        fit: BoxFit.contain,
+                        frameBuilder: (context, child, frame, sync) => AnimatedOpacity(
+                          opacity: frame == null && !sync ? 0 : 1,
+                          duration: const Duration(milliseconds: 250),
+                          child: child,
+                        ),
+                        errorBuilder: (_, _, _) => p.assetId == null
+                            ? const SizedBox.shrink()
+                            : Align(
+                                alignment: Alignment.bottomCenter,
                                 child: Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                  child: Text(
-                                    'Original no longer on this device',
-                                    style: TextStyle(color: Colors.white, fontSize: 12),
+                                  padding: EdgeInsets.all(8),
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.all(Radius.circular(12)),
+                                    ),
+                                    child: Padding(
+                                      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                      child: Text(
+                                        tr('Original no longer on this device'),
+                                        style: TextStyle(color: Colors.white, fontSize: 12),
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

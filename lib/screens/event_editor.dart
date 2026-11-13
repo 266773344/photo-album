@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../l10n/strings.dart';
+
 import '../models/models.dart';
 import '../widgets/common.dart';
 import 'moment_sheet.dart' show photosCenter;
@@ -73,19 +75,19 @@ class _EventEditorState extends State<_EventEditor> {
           children: [
             ListTile(
               leading: const Icon(Icons.auto_awesome_outlined),
-              title: const Text('Automatic'),
-              subtitle: const Text('The towns where the photos were taken'),
+              title: Text(tr('Automatic')),
+              subtitle: Text(tr('The towns where the photos were taken')),
               trailing: _manualPlace == null ? const Icon(Icons.check) : null,
               onTap: () => Navigator.pop(context, 'auto'),
             ),
             ListTile(
               leading: const Icon(Icons.map_outlined),
-              title: const Text('Choose on the map'),
+              title: Text(tr('Choose on the map')),
               onTap: () => Navigator.pop(context, 'map'),
             ),
             ListTile(
               leading: const Icon(Icons.edit_outlined),
-              title: const Text('Type a name'),
+              title: Text(tr('Type a name')),
               onTap: () => Navigator.pop(context, 'type'),
             ),
           ],
@@ -100,16 +102,16 @@ class _EventEditorState extends State<_EventEditor> {
         final e = widget.existing;
         final place = await pickPlace(
           context,
-          title: 'Where was this album?',
+          title: tr('Where was this album?'),
           near: e == null ? null : photosCenter(e.photos),
         );
         if (place != null && mounted) setState(() => _manualPlace = place.name);
       case 'type':
         final text = await editTextDialog(
           context,
-          title: 'Album place',
+          title: tr('Album place'),
           initial: _manualPlace ?? widget.existing?.location ?? '',
-          hint: 'e.g. Portugal',
+          hint: tr('e.g. Portugal'),
           multiline: false,
         );
         if (text != null && text.isNotEmpty && mounted) setState(() => _manualPlace = text);
@@ -125,13 +127,13 @@ class _EventEditorState extends State<_EventEditor> {
     final String placeHint;
     if (_manualPlace != null) {
       placeText = _manualPlace!;
-      placeHint = 'Chosen by you · tap to change';
+      placeHint = tr('Chosen by you · tap to change');
     } else if (auto.isNotEmpty) {
       placeText = auto;
-      placeHint = 'Automatic from the photos · tap to change';
+      placeHint = tr('Automatic from the photos · tap to change');
     } else {
-      placeText = 'Place';
-      placeHint = 'Filled in automatically from the photos · tap to choose';
+      placeText = tr('Place');
+      placeHint = tr('Filled in automatically from the photos · tap to choose');
     }
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.viewInsetsOf(context).bottom + 20),
@@ -142,18 +144,18 @@ class _EventEditorState extends State<_EventEditor> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(isNew ? 'New album' : 'Edit album', style: Theme.of(context).textTheme.headlineSmall),
+              Text(isNew ? tr('New album') : tr('Edit album'), style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _title,
                 autofocus: isNew,
                 textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: 'Title',
-                  hintText: 'e.g. Summer in Portugal',
+                decoration: InputDecoration(
+                  labelText: tr('Title'),
+                  hintText: tr('e.g. Summer in Portugal'),
                   border: OutlineInputBorder(),
                 ),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter a title' : null,
+                validator: (v) => (v == null || v.trim().isEmpty) ? tr('Please enter a title') : null,
               ),
               const SizedBox(height: 12),
               Material(
@@ -174,15 +176,15 @@ class _EventEditorState extends State<_EventEditor> {
                 minLines: 3,
                 maxLines: 6,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: 'Story (optional)',
-                  hintText: 'What made this trip special?',
+                decoration: InputDecoration(
+                  labelText: tr('Story (optional)'),
+                  hintText: tr('What made this trip special?'),
                   alignLabelWithHint: true,
                   border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 20),
-              FilledButton(onPressed: _submit, child: Text(isNew ? 'Create album' : 'Save')),
+              FilledButton(onPressed: _submit, child: Text(isNew ? tr('Create album') : tr('Save'))),
             ],
           ),
         ),

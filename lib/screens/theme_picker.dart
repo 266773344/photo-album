@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../l10n/strings.dart';
+
 import '../models/models.dart';
 import '../theme/event_theme.dart';
 import '../widgets/common.dart';
@@ -40,113 +42,136 @@ class _ThemePicker extends StatelessWidget {
 
     return Theme(
       data: style.themeData,
-      child: Builder(builder: (context) {
-        final s = Theme.of(context).colorScheme;
-        return Material(
-          color: s.surfaceContainerLow,
-          child: ListView(
-            controller: scroll,
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
-            children: [
-              Text('Theme & colours', style: text.headlineSmall),
-              const SizedBox(height: 16),
-              _OptionCard(
-                selected: t.source == ThemeSource.auto,
-                onTap: () => _set(context, t.copyWith(source: ThemeSource.auto)),
-                child: Row(
-                  children: [
-                    Icon(Icons.auto_awesome, color: s.primary),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('From your photos', style: text.titleMedium),
-                          Text(
-                            'Colours are picked from the album, and each day gets its own tint.',
-                            style: text.bodySmall?.copyWith(color: s.onSurfaceVariant),
-                          ),
-                          if (style.palette.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            Wrap(spacing: 4, children: [for (final c in style.palette) _Dot(color: c, size: 18)]),
+      child: Builder(
+        builder: (context) {
+          final s = Theme.of(context).colorScheme;
+          return Material(
+            color: s.surfaceContainerLow,
+            child: ListView(
+              controller: scroll,
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
+              children: [
+                Text(tr('Theme & colours'), style: text.headlineSmall),
+                const SizedBox(height: 16),
+                _OptionCard(
+                  selected: t.source == ThemeSource.auto,
+                  onTap: () => _set(context, t.copyWith(source: ThemeSource.auto)),
+                  child: Row(
+                    children: [
+                      Icon(Icons.auto_awesome, color: s.primary),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(tr('From your photos'), style: text.titleMedium),
+                            Text(
+                              tr('Colours are picked from the album, and each day gets its own tint.'),
+                              style: text.bodySmall?.copyWith(color: s.onSurfaceVariant),
+                            ),
+                            if (style.palette.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              Wrap(spacing: 4, children: [for (final c in style.palette) _Dot(color: c, size: 18)]),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
-                    ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(tr('Mood presets'), style: text.titleSmall),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final p in themePresets)
+                      ChoiceChip(
+                        selected: t.source == ThemeSource.preset && t.presetId == p.id,
+                        avatar: CircleAvatar(
+                          backgroundColor: p.seed,
+                          child: Icon(p.icon, size: 14, color: Colors.white),
+                        ),
+                        label: Text(p.name),
+                        onSelected: (_) => _set(
+                          context,
+                          EventThemeSettings(
+                            source: ThemeSource.preset,
+                            presetId: p.id,
+                            customSeed: t.customSeed,
+                            dark: null,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 20),
-              Text('Mood presets', style: text.titleSmall),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final p in themePresets)
-                    ChoiceChip(
-                      selected: t.source == ThemeSource.preset && t.presetId == p.id,
-                      avatar: CircleAvatar(backgroundColor: p.seed, child: Icon(p.icon, size: 14, color: Colors.white)),
-                      label: Text(p.name),
-                      onSelected: (_) => _set(
-                        context,
-                        EventThemeSettings(source: ThemeSource.preset, presetId: p.id, customSeed: t.customSeed, dark: null),
+                const SizedBox(height: 20),
+                Text(tr('Custom colour'), style: text.titleSmall),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    for (final c in customSeeds)
+                      InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: () => _set(
+                          context,
+                          EventThemeSettings(
+                            source: ThemeSource.custom,
+                            presetId: t.presetId,
+                            customSeed: c.toARGB32(),
+                            dark: t.dark,
+                          ),
+                        ),
+                        child: _Dot(
+                          color: c,
+                          size: 36,
+                          selected: t.source == ThemeSource.custom && t.customSeed == c.toARGB32(),
+                        ),
                       ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                Text(tr('Layout'), style: text.titleSmall),
+                const SizedBox(height: 8),
+                SegmentedButton<LayoutStyle>(
+                  segments: [
+                    ButtonSegment(
+                      value: LayoutStyle.airy,
+                      label: Text(tr('Airy')),
+                      icon: Icon(Icons.view_agenda_outlined),
                     ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Text('Custom colour', style: text.titleSmall),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  for (final c in customSeeds)
-                    InkWell(
-                      customBorder: const CircleBorder(),
-                      onTap: () => _set(
-                        context,
-                        EventThemeSettings(source: ThemeSource.custom, presetId: t.presetId, customSeed: c.toARGB32(), dark: t.dark),
-                      ),
-                      child: _Dot(
-                        color: c,
-                        size: 36,
-                        selected: t.source == ThemeSource.custom && t.customSeed == c.toARGB32(),
-                      ),
+                    ButtonSegment(
+                      value: LayoutStyle.compact,
+                      label: Text(tr('Compact')),
+                      icon: Icon(Icons.dashboard_outlined),
                     ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              Text('Layout', style: text.titleSmall),
-              const SizedBox(height: 8),
-              SegmentedButton<LayoutStyle>(
-                segments: const [
-                  ButtonSegment(value: LayoutStyle.airy, label: Text('Airy'), icon: Icon(Icons.view_agenda_outlined)),
-                  ButtonSegment(value: LayoutStyle.compact, label: Text('Compact'), icon: Icon(Icons.dashboard_outlined)),
-                ],
-                selected: {event.layout},
-                onSelectionChanged: (v) {
-                  event.layout = v.first;
-                  AlbumScope.read(context).changed(event);
-                },
-              ),
-              const SizedBox(height: 24),
-              Text('Appearance', style: text.titleSmall),
-              const SizedBox(height: 8),
-              SegmentedButton<bool?>(
-                segments: const [
-                  ButtonSegment(value: null, label: Text('Auto'), icon: Icon(Icons.brightness_auto)),
-                  ButtonSegment(value: false, label: Text('Light'), icon: Icon(Icons.light_mode_outlined)),
-                  ButtonSegment(value: true, label: Text('Dark'), icon: Icon(Icons.dark_mode_outlined)),
-                ],
-                selected: {t.dark},
-                onSelectionChanged: (v) => _set(context, t.copyWith(dark: () => v.first)),
-              ),
-            ],
-          ),
-        );
-      }),
+                  ],
+                  selected: {event.layout},
+                  onSelectionChanged: (v) {
+                    event.layout = v.first;
+                    AlbumScope.read(context).changed(event);
+                  },
+                ),
+                const SizedBox(height: 24),
+                Text(tr('Appearance'), style: text.titleSmall),
+                const SizedBox(height: 8),
+                SegmentedButton<bool?>(
+                  segments: [
+                    ButtonSegment(value: null, label: Text(tr('Auto')), icon: Icon(Icons.brightness_auto)),
+                    ButtonSegment(value: false, label: Text(tr('Light')), icon: Icon(Icons.light_mode_outlined)),
+                    ButtonSegment(value: true, label: Text(tr('Dark')), icon: Icon(Icons.dark_mode_outlined)),
+                  ],
+                  selected: {t.dark},
+                  onSelectionChanged: (v) => _set(context, t.copyWith(dark: () => v.first)),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }

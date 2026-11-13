@@ -4,6 +4,8 @@
 /// are stored separately as blobs keyed by [Photo.thumbKey] / [Photo.fullKey].
 library;
 
+import '../l10n/strings.dart';
+
 /// One weighted colour of a palette extracted from a photo.
 class PaletteColor {
   const PaletteColor(this.argb, this.weight);
@@ -18,6 +20,18 @@ class PaletteColor {
 
   factory PaletteColor.fromJson(Map<String, dynamic> j) =>
       PaletteColor(j['c'] as int, (j['w'] as num).toDouble());
+}
+
+/// Room a photo gets in the collage, from a small cell to a band of its own.
+enum PhotoSize {
+  small('Small'),
+  normal('Normal'),
+  large('Large'),
+  full('Full width');
+
+  const PhotoSize(this._label);
+  final String _label;
+  String get label => tr(_label);
 }
 
 class Photo {
@@ -36,7 +50,12 @@ class Photo {
     this.locationManual = false,
     this.assetId,
     this.folderId,
+    this.size,
   });
+
+  /// How much room the photo should get in the collage; null = automatic
+  /// (normal, or large for carousels).
+  PhotoSize? size;
 
   /// GPS position (from EXIF or set by the user).
   double? lat;
@@ -96,6 +115,7 @@ class Photo {
         if (locationManual) 'lm': true,
         if (assetId != null) 'aid': assetId,
         if (folderId != null) 'fid': folderId,
+        if (size != null) 'sz': size!.name,
       };
 
   factory Photo.fromJson(Map<String, dynamic> j) => Photo(
@@ -104,6 +124,7 @@ class Photo {
         locationManual: j['lm'] as bool? ?? false,
         assetId: j['aid'] as String?,
         folderId: j['fid'] as String?,
+        size: PhotoSize.values.asNameMap()[j['sz']],
         dhash: j['dh'] as String?,
         sharpness: (j['sh'] as num?)?.toDouble(),
         exactTime: j['et'] as bool? ?? true,
@@ -271,7 +292,11 @@ class AppSettings {
     this.onlineLookups = true,
     this.autoStories = false,
     this.realRoutes = true,
+    this.language = 'system',
   });
+
+  /// App language: 'system', 'en' or 'de'.
+  final String language;
 
   /// The user's own Anthropic API key, used for place descriptions.
   final String apiKey;
@@ -288,17 +313,25 @@ class AppSettings {
 
   bool get canWriteStories => apiKey.trim().isNotEmpty;
 
-  AppSettings copyWith({String? apiKey, String? model, bool? onlineLookups, bool? autoStories, bool? realRoutes}) =>
+  AppSettings copyWith({
+    String? apiKey,
+    String? model,
+    bool? onlineLookups,
+    bool? autoStories,
+    bool? realRoutes,
+    String? language,
+  }) =>
       AppSettings(
         apiKey: apiKey ?? this.apiKey,
         model: model ?? this.model,
         onlineLookups: onlineLookups ?? this.onlineLookups,
         autoStories: autoStories ?? this.autoStories,
         realRoutes: realRoutes ?? this.realRoutes,
+        language: language ?? this.language,
       );
 
   Map<String, dynamic> toJson() =>
-      {'apiKey': apiKey, 'model': model, 'onlineLookups': onlineLookups, 'autoStories': autoStories, 'realRoutes': realRoutes};
+      {'apiKey': apiKey, 'model': model, 'onlineLookups': onlineLookups, 'autoStories': autoStories, 'realRoutes': realRoutes, 'language': language};
 
   factory AppSettings.fromJson(Map<String, dynamic> j) => AppSettings(
         apiKey: j['apiKey'] as String? ?? '',
@@ -306,6 +339,7 @@ class AppSettings {
         onlineLookups: j['onlineLookups'] as bool? ?? true,
         autoStories: j['autoStories'] as bool? ?? false,
         realRoutes: j['realRoutes'] as bool? ?? true,
+        language: j['language'] as String? ?? 'system',
       );
 }
 
@@ -354,6 +388,9 @@ class AlbumEvent {
 
   /// Town / area name per day (keyed by [dayKey]), looked up from GPS.
   final Map<String, String> dayPlaces;
+
+  /// Language the [dayPlaces] (and the automatic album place) are in.
+  String? placesLanguage;
 
   LayoutStyle layout;
 
@@ -422,6 +459,7 @@ class AlbumEvent {
         if (excludedAssets.isNotEmpty) 'xa': excludedAssets.toList(),
         if (locationManual) 'lm': true,
         if (!showJourneyMap) 'jm': false,
+        if (placesLanguage != null) 'pl': placesLanguage,
         if (routes.isNotEmpty) 'rt': routes.map((k, v) => MapEntry(k, v.toJson())),
       };
 
@@ -451,7 +489,7 @@ class AlbumEvent {
         locationManual: j['lm'] as bool? ?? false,
         showJourneyMap: j['jm'] as bool? ?? true,
         routes: (j['rt'] as Map?)?.map((k, v) => MapEntry(k as String, LegRoute.fromJson(v as Map<String, dynamic>))),
-      );
+      )..placesLanguage = j['pl'] as String?;
 }
 
 /// How a stretch of the journey was travelled.
@@ -465,8 +503,9 @@ enum TravelMode {
   /// Unknown: drawn as a straight dashed line.
   straight('Straight line');
 
-  const TravelMode(this.label);
-  final String label;
+  const TravelMode(this._label);
+  final String _label;
+  String get label => tr(_label);
 
   /// Modes that follow the road / path network.
   bool get routed => this == car || this == foot;

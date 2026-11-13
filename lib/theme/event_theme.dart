@@ -1,12 +1,16 @@
+import 'dart:math' as math;
+import '../l10n/strings.dart';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../models/models.dart';
 import 'palette.dart';
 
 class ThemePreset {
-  const ThemePreset(this.id, this.name, this.icon, this.seed, {this.dark = false});
+  const ThemePreset(this.id, this._name, this.icon, this.seed, {this.dark = false});
   final String id;
-  final String name;
+  final String _name;
+  String get name => tr(_name);
   final IconData icon;
   final Color seed;
   final bool dark;
@@ -79,10 +83,34 @@ class EventStyle {
   static void invalidate(String eventId) {
     _cache.remove(eventId);
     _albumPalettes.remove(eventId);
+    _libraryTint = null;
   }
 
   /// Recompute every album's colours (their comparison baseline changed).
-  static void invalidateComparisons() => _cache.clear();
+  static void invalidateComparisons() {
+    _cache.clear();
+    _libraryTint = null;
+  }
+
+  static Color? _libraryTint;
+
+  /// The average signature colour of all albums (weighted by their size),
+  /// for a gentle tint of the home page. Null without photos.
+  static Color? libraryTint() {
+    if (_libraryTint != null) return _libraryTint;
+    var r = 0.0, g = 0.0, b = 0.0, w = 0.0;
+    for (final e in library()) {
+      if (e.photos.isEmpty) continue;
+      final c = haloColor(EventStyle.of(e));
+      final weight = math.sqrt(e.photos.length.toDouble());
+      r += c.r * weight;
+      g += c.g * weight;
+      b += c.b * weight;
+      w += weight;
+    }
+    if (w == 0) return null;
+    return _libraryTint = Color.from(alpha: 1, red: r / w, green: g / w, blue: b / w);
+  }
 
   static List<PaletteColor> _albumPalette(AlbumEvent e) =>
       _albumPalettes[e.id] ??= mergePalettes(e.photos.map((p) => p.palette), maxColors: 24);
@@ -149,4 +177,12 @@ LinearGradient eventGradient(EventStyle s) {
       s.scheme.tertiaryContainer,
     ],
   );
+}
+
+/// An album's main signature colour, toned down ([grey] of the way towards
+/// a neutral grey) so several of them side by side stay calm.
+Color haloColor(EventStyle s, {double grey = 0.4}) {
+  final c = s.palette.isNotEmpty ? s.palette.first : s.seed;
+  final neutral = c.computeLuminance() > 0.5 ? const Color(0xFFB0B0B0) : const Color(0xFF707070);
+  return Color.lerp(c, neutral, grey)!;
 }

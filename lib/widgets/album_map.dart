@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import '../l10n/strings.dart';
+
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
@@ -22,9 +24,9 @@ List<Widget> baseMapLayers(BuildContext context) {
 }
 
 Widget osmAttribution() => const RichAttributionWidget(
-      showFlutterMapAttribution: false,
-      attributions: [TextSourceAttribution('OpenStreetMap contributors')],
-    );
+  showFlutterMapAttribution: false,
+  attributions: [TextSourceAttribution('OpenStreetMap contributors')],
+);
 
 /// One stretch of the journey between two consecutive stops.
 class JourneyLeg {
@@ -96,8 +98,9 @@ Widget journeyRouteLayer(
           points: leg.points,
           hitValue: leg.key,
           strokeWidth: leg.mode == TravelMode.foot ? width * 0.8 : width,
-          color: (leg.mode == TravelMode.ferry ? s.tertiary : s.primary)
-              .withValues(alpha: current == null || leg.to.index <= current ? 0.85 : 0.3),
+          color: (leg.mode == TravelMode.ferry ? s.tertiary : s.primary).withValues(
+            alpha: current == null || leg.to.index <= current ? 0.85 : 0.3,
+          ),
           pattern: leg.dashed ? StrokePattern.dashed(segments: [width * 3, width * 2.2]) : const StrokePattern.solid(),
         ),
     ],
@@ -157,11 +160,13 @@ class VisitMarkerLayer extends StatelessWidget {
                 final visits = g.$2;
                 // Zoom in to separate merged stops, unless they can't be separated.
                 if (visits.length > 1 && zoomIntoGroups && camera.zoom < 17.5) {
-                  MapController.of(context).fitCamera(CameraFit.coordinates(
-                    coordinates: [for (final v in visits) v.center],
-                    padding: EdgeInsets.all(size * 1.5),
-                    maxZoom: 18,
-                  ));
+                  MapController.of(context).fitCamera(
+                    CameraFit.coordinates(
+                      coordinates: [for (final v in visits) v.center],
+                      padding: EdgeInsets.all(size * 1.5),
+                      maxZoom: 18,
+                    ),
+                  );
                 } else {
                   onTapVisit(visits.first);
                 }
@@ -231,6 +236,64 @@ class VisitPin extends StatelessWidget {
   }
 }
 
+const _pinSize = 34.0;
+
+/// Web-mercator position of [p] on a world 1 unit wide.
+(double, double) _mercator(LatLng p) {
+  final lat = p.latitude.clamp(-85.0, 85.0) * math.pi / 180;
+  return ((p.longitude + 180) / 360, (1 - math.log(math.tan(lat) + 1 / math.cos(lat)) / math.pi) / 2);
+}
+
+/// Zoom for showing stop [i] of [stops] (time order) on a map of [viewport]
+/// centred on it: close enough to show its neighbourhood (nearby stops
+/// shortly before/after, within ~30 km) and for its pin not to merge with
+/// the nearest other stop - independent of how big the whole trip is.
+double followZoom(
+  List<LatLng> stops,
+  int i, {
+  required double overviewZoom,
+  required Size viewport,
+  double pinSize = _pinSize,
+  double maxZoom = 16.5,
+}) {
+  const tile = 256.0;
+  final here = stops[i];
+  final (hx, hy) = _mercator(here);
+  const dist = Distance();
+
+  // 1. The neighbourhood: stops just before/after that are close by.
+  var dx = 0.0, dy = 0.0;
+  for (var k = math.max(0, i - 2); k <= math.min(stops.length - 1, i + 2); k++) {
+    if (k == i || dist(here, stops[k]) > 30000) continue;
+    final (x, y) = _mercator(stops[k]);
+    dx = math.max(dx, (x - hx).abs());
+    dy = math.max(dy, (y - hy).abs());
+  }
+  final halfW = math.max(40.0, viewport.width / 2 - 30), halfH = math.max(30.0, viewport.height / 2 - 34);
+  double regionZoom;
+  if (dx == 0 && dy == 0) {
+    regionZoom = 13; // alone: town level
+  } else {
+    final fit = math.min(
+      dx == 0 ? double.infinity : halfW / (dx * tile),
+      dy == 0 ? double.infinity : halfH / (dy * tile),
+    );
+    regionZoom = math.log(fit) / math.ln2;
+  }
+
+  // 2. Keep its pin apart from the nearest stop.
+  var nearest = double.infinity;
+  for (var k = 0; k < stops.length; k++) {
+    if (k == i) continue;
+    final (x, y) = _mercator(stops[k]);
+    final d = math.sqrt((x - hx) * (x - hx) + (y - hy) * (y - hy));
+    if (d > 0) nearest = math.min(nearest, d);
+  }
+  final separateZoom = nearest.isFinite ? math.log(1.3 * pinSize / (tile * nearest)) / math.ln2 : 0.0;
+
+  return math.max(regionZoom, separateZoom).clamp(math.min(overviewZoom, maxZoom), maxZoom);
+}
+
 /// The journey map in the album header. Non-interactive (it must not fight
 /// the page scroll); follows [current] with a smooth camera move.
 class JourneyHeaderMap extends StatefulWidget {
@@ -272,10 +335,10 @@ class _JourneyHeaderMapState extends State<JourneyHeaderMap> with SingleTickerPr
   }
 
   CameraFit get _overview => CameraFit.coordinates(
-        coordinates: widget.geo.allPoints,
-        padding: const EdgeInsets.fromLTRB(36, 72, 36, 28),
-        maxZoom: 14,
-      );
+    coordinates: widget.geo.allPoints,
+    padding: const EdgeInsets.fromLTRB(36, 72, 36, 28),
+    maxZoom: 14,
+  );
 
   void _follow() {
     final camera = _map.camera;
@@ -287,10 +350,17 @@ class _JourneyHeaderMapState extends State<JourneyHeaderMap> with SingleTickerPr
       center = overview.center;
       zoom = overview.zoom;
     } else {
-      // A little closer than the overview, centred on the current stop.
       center = widget.geo.visits[i].center;
-      zoom = math.min(overview.zoom + 1.5, 15.0);
+      zoom = followZoom(
+        widget.geo.allPoints,
+        i,
+        overviewZoom: overview.zoom,
+        viewport: camera.nonRotatedSize,
+        pinSize: _pinSize,
+      );
     }
+    // Big jumps (another city or country) take a little longer.
+    _anim.duration = Duration(milliseconds: (zoom - camera.zoom).abs() > 4 ? 950 : 700);
     final lat = Tween(begin: camera.center.latitude, end: center.latitude);
     final lng = Tween(begin: camera.center.longitude, end: center.longitude);
     final z = Tween(begin: camera.zoom, end: zoom);
@@ -326,7 +396,7 @@ class _JourneyHeaderMapState extends State<JourneyHeaderMap> with SingleTickerPr
         VisitMarkerLayer(
           geo: widget.geo,
           current: widget.current,
-          size: 34,
+          size: _pinSize,
           zoomIntoGroups: false,
           onTapVisit: widget.onTapVisit,
         ),
@@ -370,13 +440,13 @@ class _AlbumMapScreenState extends State<AlbumMapScreen> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-                child: Text('How did you travel here?', style: Theme.of(context).textTheme.titleLarge),
+                child: Text(tr('How did you travel here?'), style: Theme.of(context).textTheme.titleLarge),
               ),
               for (final m in TravelMode.values)
                 ListTile(
                   leading: Icon(travelModeIcon(m)),
                   title: Text(m.label),
-                  subtitle: m.routed ? const Text('Follows roads and paths') : null,
+                  subtitle: m.routed ? Text(tr('Follows roads and paths')) : null,
                   trailing: leg.mode == m ? const Icon(Icons.check) : null,
                   onTap: () => Navigator.pop(context, m),
                 ),
@@ -404,7 +474,7 @@ class _AlbumMapScreenState extends State<AlbumMapScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(e.title)),
       body: geo.isEmpty
-          ? const Center(child: Text('No photo in this album has a location yet.'))
+          ? Center(child: Text(tr('No photo in this album has a location yet.')))
           : FlutterMap(
               options: MapOptions(
                 initialCenter: widget.focus ?? geo.allPoints.first,
@@ -429,13 +499,13 @@ class _AlbumMapScreenState extends State<AlbumMapScreen> {
 }
 
 IconData travelModeIcon(TravelMode m) => switch (m) {
-      TravelMode.car => Icons.directions_car_outlined,
-      TravelMode.foot => Icons.directions_walk,
-      TravelMode.train => Icons.train_outlined,
-      TravelMode.ferry => Icons.directions_boat_outlined,
-      TravelMode.flight => Icons.flight,
-      TravelMode.straight => Icons.horizontal_rule,
-    };
+  TravelMode.car => Icons.directions_car_outlined,
+  TravelMode.foot => Icons.directions_walk,
+  TravelMode.train => Icons.train_outlined,
+  TravelMode.ferry => Icons.directions_boat_outlined,
+  TravelMode.flight => Icons.flight,
+  TravelMode.straight => Icons.horizontal_rule,
+};
 
 /// Small, non-interactive overview map (shown when the header map is hidden).
 class AlbumMapCard extends StatelessWidget {
@@ -473,7 +543,10 @@ class AlbumMapCard extends StatelessWidget {
               ),
             ),
             Positioned.fill(
-              child: Material(type: MaterialType.transparency, child: InkWell(onTap: onOpen)),
+              child: Material(
+                type: MaterialType.transparency,
+                child: InkWell(onTap: onOpen),
+              ),
             ),
             Positioned(
               right: 8,
@@ -481,12 +554,18 @@ class AlbumMapCard extends StatelessWidget {
               child: IgnorePointer(
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(color: s.surface.withValues(alpha: 0.9), borderRadius: BorderRadius.circular(14)),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.map_outlined, size: 16, color: s.primary),
-                    const SizedBox(width: 6),
-                    Text('Open map', style: TextStyle(color: s.onSurface, fontSize: 12.5)),
-                  ]),
+                  decoration: BoxDecoration(
+                    color: s.surface.withValues(alpha: 0.9),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.map_outlined, size: 16, color: s.primary),
+                      const SizedBox(width: 6),
+                      Text(tr('Open map'), style: TextStyle(color: s.onSurface, fontSize: 12.5)),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -494,7 +573,10 @@ class AlbumMapCard extends StatelessWidget {
               left: 8,
               bottom: 6,
               child: IgnorePointer(
-                child: Text('© OpenStreetMap', style: TextStyle(fontSize: 10, color: s.onSurface.withValues(alpha: 0.7))),
+                child: Text(
+                  '© OpenStreetMap',
+                  style: TextStyle(fontSize: 10, color: s.onSurface.withValues(alpha: 0.7)),
+                ),
               ),
             ),
           ],
