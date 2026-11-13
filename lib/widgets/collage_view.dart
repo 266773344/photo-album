@@ -17,7 +17,15 @@ class CollageInteraction {
     required this.onToggle,
     required this.onStartSelection,
     this.flat = false,
+    this.highlighted = const {},
+    this.registry,
   });
+
+  /// Photo ids to outline briefly (e.g. after jumping here from the map).
+  final Set<String> highlighted;
+
+  /// Where cells register themselves, so the album can find them on screen.
+  final CellRegistry? registry;
 
   /// Selected photo ids; non-empty means selection mode is active.
   final Set<String> selected;
@@ -32,6 +40,27 @@ class CollageInteraction {
 
   bool get selecting => selected.isNotEmpty;
   bool isSelected(AlbumItem item) => item.ids.every(selected.contains);
+}
+
+/// Maps photo ids to the [BuildContext] of the collage cell showing them,
+/// for the cells that are currently built.
+class CellRegistry {
+  final Map<String, BuildContext> _cells = {};
+
+  BuildContext? operator [](String photoId) => _cells[photoId];
+  Iterable<MapEntry<String, BuildContext>> get entries => _cells.entries;
+
+  void _add(Iterable<String> ids, BuildContext context) {
+    for (final id in ids) {
+      _cells[id] = context;
+    }
+  }
+
+  void _remove(Iterable<String> ids, BuildContext context) {
+    for (final id in ids) {
+      if (identical(_cells[id], context)) _cells.remove(id);
+    }
+  }
 }
 
 /// Renders one [CollageBlock]: a full-width band with items placed in it.
@@ -107,6 +136,7 @@ class _CellState extends State<_Cell> {
   @override
   void initState() {
     super.initState();
+    widget.interaction.registry?._add(widget.item.ids, context);
     if (widget.item.isStack) {
       _pages = PageController(initialPage: _loopBase * widget.item.photos.length);
       // Stagger carousels so they don't all turn at the same moment.
@@ -131,10 +161,13 @@ class _CellState extends State<_Cell> {
   void didUpdateWidget(covariant _Cell old) {
     super.didUpdateWidget(old);
     if (_page >= widget.item.photos.length) _page = 0;
+    old.interaction.registry?._remove(old.item.ids, context);
+    widget.interaction.registry?._add(widget.item.ids, context);
   }
 
   @override
   void dispose() {
+    widget.interaction.registry?._remove(widget.item.ids, context);
     _start?.cancel();
     _timer?.cancel();
     _pages?.dispose();
@@ -201,6 +234,18 @@ class _CellState extends State<_Cell> {
                 behavior: HitTestBehavior.translucent,
                 onTap: () => ia.selecting ? ia.onToggle(item) : ia.onOpen(current),
                 onLongPress: () => ia.selecting ? ia.onToggle(item) : ia.onStartSelection(item),
+              ),
+              IgnorePointer(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: item.ids.any(ia.highlighted.contains) ? scheme.primary : Colors.transparent,
+                      width: 4,
+                    ),
+                  ),
+                ),
               ),
               if (ia.selecting)
                 IgnorePointer(

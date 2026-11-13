@@ -73,6 +73,75 @@ int? chooseSeed(List<PaletteColor> palette) {
   return best;
 }
 
+/// How typical a colour is for the generic backgrounds of travel photos:
+/// sky blue, grey buildings/roads, foliage green, earth/sand, near-white and
+/// near-black. 0 = distinctive, up to ~0.9 = very generic.
+double backgroundCommonness(int argb) {
+  final c = _hsl(argb);
+  if (c.l > 0.9 || c.l < 0.1) return 0.9;
+  if (c.s < 0.15) return 0.85; // greys
+  final h = c.h;
+  if (h >= 185 && h <= 235 && c.s < 0.75) return 0.75; // sky
+  if (h >= 65 && h <= 165 && c.s < 0.6) return 0.7; // foliage, grass
+  if (h >= 15 && h <= 50 && c.s < 0.55 && c.l < 0.75) return 0.6; // earth, sand, stone
+  return 0;
+}
+
+/// How well a colour characterises an album: present in its photos, vivid,
+/// not a generic background colour, and (when [baseline] - the user's other
+/// albums - is given) more common here than elsewhere.
+double vibeScore(PaletteColor c, {List<PaletteColor> baseline = const []}) {
+  final hsl = _hsl(c.argb);
+  final chroma = hsl.s * (1 - (2 * hsl.l - 1).abs());
+  var elsewhere = 0.0;
+  for (final b in baseline) {
+    if (_dist2(b.argb, c.argb) < _mergeThreshold2) elsewhere += b.weight;
+  }
+  return math.pow(c.weight, 0.5) *
+      (0.04 + chroma) *
+      (1 - backgroundCommonness(c.argb)) /
+      (1 + 3 * elsewhere);
+}
+
+/// The [count] colours that best capture an album's "vibe" (see
+/// [vibeScore]), with different hues so the row isn't five blues.
+/// [palette] should be a fine-grained merge (e.g. 24 colours).
+List<PaletteColor> signatureColors(
+  List<PaletteColor> palette, {
+  List<PaletteColor> baseline = const [],
+  int count = 5,
+  double minHueDistance = 28,
+}) {
+  final ranked = [...palette]..sort((a, b) => vibeScore(b, baseline: baseline).compareTo(vibeScore(a, baseline: baseline)));
+  final out = <PaletteColor>[];
+  bool distinct(PaletteColor c) {
+    final h = _hsl(c.argb);
+    return out.every((o) {
+      final oh = _hsl(o.argb);
+      // Greys have no meaningful hue: compare lightness instead.
+      if (h.s < 0.15 || oh.s < 0.15) return (h.l - oh.l).abs() > 0.15 || (h.s - oh.s).abs() > 0.2;
+      final d = (h.h - oh.h).abs();
+      return math.min(d, 360 - d) >= minHueDistance;
+    });
+  }
+
+  for (final c in ranked) {
+    if (out.length == count) break;
+    if (distinct(c)) out.add(c);
+  }
+  // Not enough different hues: fill up with the next best.
+  for (final c in ranked) {
+    if (out.length == count) break;
+    if (!out.contains(c)) out.add(c);
+  }
+  return out;
+}
+
+double _dist2(int a, int b) {
+  final dr = (_r(a) - _r(b)).toDouble(), dg = (_g(a) - _g(b)).toDouble(), db = (_b(a) - _b(b)).toDouble();
+  return 2 * dr * dr + 4 * dg * dg + 3 * db * db;
+}
+
 /// Weighted mean lightness (0..1) of a palette.
 double averageLightness(List<PaletteColor> palette) {
   var sum = 0.0, w = 0.0;

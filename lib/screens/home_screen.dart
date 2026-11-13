@@ -19,6 +19,10 @@ class HomeScreen extends StatelessWidget {
       location: details.location,
       description: details.description,
     );
+    if (details.locationManual) {
+      e.locationManual = true;
+      await repo.changed(e);
+    }
     if (context.mounted) openEvent(context, e, pickPhotos: true);
   }
 
@@ -137,7 +141,7 @@ class _EventCard extends StatelessWidget {
                       decoration: BoxDecoration(gradient: eventGradient(style)),
                       child: Center(child: Icon(Icons.photo_library_outlined, size: 48, color: s.onPrimaryContainer)),
                     )
-                  : _CoverMosaic(event: event),
+                  : PhotoThumb(photo: cover, radius: 0),
             ),
             if (progress != null) LinearProgressIndicator(value: progress.$1 / progress.$2),
             Container(
@@ -190,38 +194,6 @@ class _EventCard extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-/// Cover photo plus up to two small accent photos, like a stack of prints.
-class _CoverMosaic extends StatelessWidget {
-  const _CoverMosaic({required this.event});
-  final AlbumEvent event;
-
-  @override
-  Widget build(BuildContext context) {
-    final cover = event.cover!;
-    final others = event.photos.where((p) => p.id != cover.id).toList();
-    // Pick two spread-out photos so the preview shows variety.
-    final extras = others.length < 3 ? <Photo>[] : [others[others.length ~/ 3], others[others.length * 2 ~/ 3]];
-    if (extras.isEmpty) return PhotoThumb(photo: cover, radius: 0);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(flex: 2, child: PhotoThumb(photo: cover, radius: 0)),
-        const SizedBox(width: 2),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(child: PhotoThumb(photo: extras[0], radius: 0)),
-              const SizedBox(height: 2),
-              Expanded(child: PhotoThumb(photo: extras[1], radius: 0)),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }

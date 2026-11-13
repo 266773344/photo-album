@@ -8,7 +8,9 @@ import 'package:photo_album/data/photo_processor.dart';
 import 'package:photo_album/data/storage/storage.dart';
 import 'package:photo_album/layout/collage_layout.dart';
 import 'package:photo_album/models/grouping.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:photo_album/models/models.dart';
+import 'package:photo_album/models/visits.dart';
 import 'package:photo_album/services/geocoding.dart';
 import 'package:photo_album/services/place_story.dart';
 import 'package:photo_album/widgets/album_map.dart';
@@ -165,19 +167,50 @@ void main() {
     });
   });
 
-  test('album map collects photo positions, moment pins and the route', () {
+  test('hand-placed moments join the route between the stops before and after them', () {
     final t = DateTime(2024, 8, 1, 9);
     final e = AlbumEvent(id: 'e', title: 'T', createdAt: t, photos: [
       photo('a', t, lat: 38.71, lng: -9.14),
       photo('b', t.add(const Duration(hours: 1))),
       photo('c', t.add(const Duration(hours: 2)), lat: 38.70, lng: -9.20),
+      photo('d', t.add(const Duration(hours: 3))), // no position, no moment
     ]);
     final m = e.createMoment('Lunch', '', ['b']);
     m.place = const GeoPlace(name: 'Tasca', lat: 38.705, lng: -9.17);
     final geo = AlbumGeo(e);
-    expect(geo.pins.where((p) => p.item != null).map((p) => p.item!.cover.id), ['a', 'c']);
-    expect(geo.pins.where((p) => p.moment != null).single.moment!.title, 'Lunch');
-    expect(geo.route, hasLength(2));
+    expect(geo.visits.map((v) => v.photos.single.id), ['a', 'b', 'c']);
+    expect(geo.visits[1].label, 'Lunch');
+    expect(geo.visits[1].center, const LatLng(38.705, -9.17));
+    expect(geo.legs, hasLength(2));
+    expect(geo.legs.first.to.index, 1);
+    // A photo without a position belongs to the stop before it.
+    expect(geo.visitOfPhoto('d'), 2);
+  });
+
+  group('visits', () {
+    final t = DateTime(2024, 8, 1, 9);
+
+    test('close in place and time = one stop; same place hours later = new stop', () {
+      final e = AlbumEvent(id: 'e', title: 'T', createdAt: t, photos: [
+        photo('a', t, lat: 38.7100, lng: -9.1400),
+        photo('b', t.add(const Duration(minutes: 20)), lat: 38.7105, lng: -9.1405), // ~70 m away
+        photo('c', t.add(const Duration(minutes: 50)), lat: 38.7300, lng: -9.1400), // ~2 km away
+        photo('d', t.add(const Duration(hours: 6)), lat: 38.7300, lng: -9.1400), // same place, much later
+      ]);
+      final visits = buildVisits(e);
+      expect(visits.map((v) => v.photos.map((p) => p.id).join()), ['ab', 'c', 'd']);
+    });
+
+    test('representative is the sharpest photo; label only when the stop is one moment', () {
+      final e = AlbumEvent(id: 'e', title: 'T', createdAt: t, photos: [
+        photo('a', t, lat: 38.71, lng: -9.14)..sharpness = 1,
+        photo('b', t.add(const Duration(minutes: 5)), lat: 38.71, lng: -9.14)..sharpness = 9,
+      ]);
+      expect(buildVisits(e).single.representative.id, 'b');
+      expect(buildVisits(e).single.label, isNull);
+      e.createMoment('Breakfast', '', ['a', 'b']);
+      expect(buildVisits(e).single.label, 'Breakfast');
+    });
   });
 
   test('setting a location manually updates photos and re-names the day', () async {

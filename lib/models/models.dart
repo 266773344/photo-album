@@ -270,6 +270,7 @@ class AppSettings {
     this.model = 'claude-opus-5-5',
     this.onlineLookups = true,
     this.autoStories = false,
+    this.realRoutes = true,
   });
 
   /// The user's own Anthropic API key, used for place descriptions.
@@ -282,23 +283,29 @@ class AppSettings {
   /// Write a place description automatically when a moment gets a place.
   final bool autoStories;
 
+  /// Draw real travel routes (OpenStreetMap routing) between the stops on maps.
+  final bool realRoutes;
+
   bool get canWriteStories => apiKey.trim().isNotEmpty;
 
-  AppSettings copyWith({String? apiKey, String? model, bool? onlineLookups, bool? autoStories}) => AppSettings(
+  AppSettings copyWith({String? apiKey, String? model, bool? onlineLookups, bool? autoStories, bool? realRoutes}) =>
+      AppSettings(
         apiKey: apiKey ?? this.apiKey,
         model: model ?? this.model,
         onlineLookups: onlineLookups ?? this.onlineLookups,
         autoStories: autoStories ?? this.autoStories,
+        realRoutes: realRoutes ?? this.realRoutes,
       );
 
   Map<String, dynamic> toJson() =>
-      {'apiKey': apiKey, 'model': model, 'onlineLookups': onlineLookups, 'autoStories': autoStories};
+      {'apiKey': apiKey, 'model': model, 'onlineLookups': onlineLookups, 'autoStories': autoStories, 'realRoutes': realRoutes};
 
   factory AppSettings.fromJson(Map<String, dynamic> j) => AppSettings(
         apiKey: j['apiKey'] as String? ?? '',
         model: j['model'] as String? ?? 'claude-opus-5-5',
         onlineLookups: j['onlineLookups'] as bool? ?? true,
         autoStories: j['autoStories'] as bool? ?? false,
+        realRoutes: j['realRoutes'] as bool? ?? true,
       );
 }
 
@@ -322,9 +329,13 @@ class AlbumEvent {
     this.layout = LayoutStyle.airy,
     List<FolderLink>? linkedFolders,
     Set<String>? excludedAssets,
+    this.locationManual = false,
+    this.showJourneyMap = true,
+    Map<String, LegRoute>? routes,
   })  : photos = photos ?? [],
         linkedFolders = linkedFolders ?? [],
         excludedAssets = excludedAssets ?? {},
+        routes = routes ?? {},
         dayPlaces = dayPlaces ?? {},
         dayNotes = dayNotes ?? {},
         stacks = stacks ?? [],
@@ -351,6 +362,16 @@ class AlbumEvent {
 
   /// Gallery photos the user removed from the album; folder sync skips them.
   final Set<String> excludedAssets;
+
+  /// Whether [location] was set by the user. Otherwise it is derived from
+  /// the towns of the photos (see [AlbumRepository.refreshDayPlaces]).
+  bool locationManual;
+
+  /// Show the journey map in the album header.
+  bool showJourneyMap;
+
+  /// Travel routes between consecutive stops, keyed by [legKey].
+  final Map<String, LegRoute> routes;
 
   final String id;
   String title;
@@ -399,6 +420,9 @@ class AlbumEvent {
         'layout': layout.name,
         if (linkedFolders.isNotEmpty) 'lf': linkedFolders.map((l) => l.toJson()).toList(),
         if (excludedAssets.isNotEmpty) 'xa': excludedAssets.toList(),
+        if (locationManual) 'lm': true,
+        if (!showJourneyMap) 'jm': false,
+        if (routes.isNotEmpty) 'rt': routes.map((k, v) => MapEntry(k, v.toJson())),
       };
 
   factory AlbumEvent.fromJson(Map<String, dynamic> j) => AlbumEvent(
@@ -424,8 +448,57 @@ class AlbumEvent {
         layout: LayoutStyle.values.asNameMap()[j['layout']] ?? LayoutStyle.airy,
         linkedFolders: (j['lf'] as List?)?.map((e) => FolderLink.fromJson(e as Map<String, dynamic>)).toList(),
         excludedAssets: (j['xa'] as List?)?.cast<String>().toSet(),
+        locationManual: j['lm'] as bool? ?? false,
+        showJourneyMap: j['jm'] as bool? ?? true,
+        routes: (j['rt'] as Map?)?.map((k, v) => MapEntry(k as String, LegRoute.fromJson(v as Map<String, dynamic>))),
       );
 }
+
+/// How a stretch of the journey was travelled.
+enum TravelMode {
+  car('Car / bus'),
+  foot('On foot'),
+  train('Train'),
+  ferry('Ferry / boat'),
+  flight('Flight'),
+
+  /// Unknown: drawn as a straight dashed line.
+  straight('Straight line');
+
+  const TravelMode(this.label);
+  final String label;
+
+  /// Modes that follow the road / path network.
+  bool get routed => this == car || this == foot;
+}
+
+/// The route of one leg between two stops. [polyline] is an encoded polyline
+/// (precision 5, as returned by OSRM); null means draw a straight or arced line.
+class LegRoute {
+  const LegRoute({required this.mode, this.polyline, this.manual = false});
+  final TravelMode mode;
+  final String? polyline;
+
+  /// Mode chosen by the user (never replaced automatically).
+  final bool manual;
+
+  Map<String, dynamic> toJson() => {
+        'm': mode.name,
+        if (polyline != null) 'p': polyline,
+        if (manual) 'u': true,
+      };
+
+  factory LegRoute.fromJson(Map<String, dynamic> j) => LegRoute(
+        mode: TravelMode.values.asNameMap()[j['m']] ?? TravelMode.straight,
+        polyline: j['p'] as String?,
+        manual: j['u'] as bool? ?? false,
+      );
+}
+
+/// Cache key for the leg between two points (rounded to ~100 m, so small
+/// changes in a stop's centre don't trigger a new route lookup).
+String legKey(double lat1, double lng1, double lat2, double lng2) =>
+    [lat1, lng1, lat2, lng2].map((v) => v.toStringAsFixed(3)).join(',');
 
 /// A device gallery folder whose photos an album mirrors.
 class FolderLink {

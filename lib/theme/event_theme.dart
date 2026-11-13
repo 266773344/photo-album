@@ -68,12 +68,38 @@ class EventStyle {
 
   static EventStyle of(AlbumEvent e) => _cache[e.id] ??= _compute(e);
 
+  /// Fine-grained palette per album (24 colours), for comparing albums.
+  static final _albumPalettes = <String, List<PaletteColor>>{};
+
+  /// All albums of the library, so an album's colours can be compared with
+  /// the others (set by the app; empty in isolation).
+  static Iterable<AlbumEvent> Function() library = () => const [];
+
   /// Must be called whenever an event's photos or theme settings change.
-  static void invalidate(String eventId) => _cache.remove(eventId);
+  static void invalidate(String eventId) {
+    _cache.remove(eventId);
+    _albumPalettes.remove(eventId);
+  }
+
+  /// Recompute every album's colours (their comparison baseline changed).
+  static void invalidateComparisons() => _cache.clear();
+
+  static List<PaletteColor> _albumPalette(AlbumEvent e) =>
+      _albumPalettes[e.id] ??= mergePalettes(e.photos.map((p) => p.palette), maxColors: 24);
 
   static EventStyle _compute(AlbumEvent e) {
     final merged = mergePalettes(e.photos.map((p) => p.palette));
-    final autoSeedArgb = chooseSeed(merged);
+    // The album's signature colours: vivid, not sky/stone/foliage, and more
+    // typical of this trip than of the user's other albums.
+    final others = [
+      for (final o in library())
+        if (o.id != e.id && o.photos.isNotEmpty) _albumPalette(o),
+    ];
+    final signature = signatureColors(
+      _albumPalette(e),
+      baseline: others.isEmpty ? const [] : mergePalettes(others, maxColors: 24),
+    );
+    final autoSeedArgb = signature.isNotEmpty ? signature.first.argb : chooseSeed(merged);
     final autoSeed = autoSeedArgb == null ? _fallbackSeed : Color(autoSeedArgb);
 
     Color seed;
@@ -108,7 +134,7 @@ class EventStyle {
       tints[day.key] = Color.lerp(scheme.surface, daySeed, dark ? 0.16 : 0.22)!;
     }
 
-    return EventStyle._(scheme, seed, merged.map((c) => Color(c.argb)).toList(), tints, useDayColors);
+    return EventStyle._(scheme, seed, signature.map((c) => Color(c.argb)).toList(), tints, useDayColors);
   }
 }
 

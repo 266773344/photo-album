@@ -10,6 +10,9 @@ import '../models/models.dart';
 import '../services/gallery.dart';
 import '../services/geocoding.dart';
 import '../services/place_story.dart';
+import '../services/routing.dart';
+import '../models/visits.dart';
+import 'package:latlong2/latlong.dart';
 import '../theme/event_theme.dart';
 import 'photo_processor.dart';
 import 'similarity.dart';
@@ -23,9 +26,22 @@ class AlbumRepository extends ChangeNotifier {
     PlaceStoryWriter? storyWriter,
     Gallery? gallery,
     bool useDeviceGallery = true,
+    RouteFinder? routeFinder,
   })  : geocoder = geocoder ?? Geocoder.instance,
         storyWriter = storyWriter ?? PlaceStoryWriter(),
+        routeFinder = routeFinder ?? RouteFinder.instance,
         gallery = gallery ?? (useDeviceGallery ? Gallery.create() : null);
+
+  final RouteFinder routeFinder;
+
+  /// Lets album colours be compared across the library.
+  void _linkStyles() => EventStyle.library = () => _events;
+
+  /// Asks an open album page to scroll to these photos (e.g. after tapping a
+  /// pin on the map): (album id, photo ids).
+  final ValueNotifier<(String, List<String>)?> focusRequest = ValueNotifier(null);
+
+  void requestFocus(AlbumEvent e, List<String> photoIds) => focusRequest.value = (e.id, photoIds);
 
   final AppStorage storage;
 
@@ -42,9 +58,15 @@ class AlbumRepository extends ChangeNotifier {
   final Set<String> storyLoading = {};
 
   Future<void> updateSettings(AppSettings s) async {
+    final routesTurnedOn = s.realRoutes && s.onlineLookups && !(settings.realRoutes && settings.onlineLookups);
     settings = s;
     notifyListeners();
     await _save();
+    if (routesTurnedOn) {
+      for (final e in [..._events]) {
+        unawaited(refreshRoutes(e));
+      }
+    }
   }
 
   /// Import progress per event id: (done, total).
@@ -60,6 +82,7 @@ class AlbumRepository extends ChangeNotifier {
   AlbumEvent? byId(String id) => _events.where((e) => e.id == id).firstOrNull;
 
   Future<void> load() async {
+    _linkStyles();
     await storage.init();
     final raw = await storage.readMeta();
     if (raw != null) {
@@ -73,6 +96,9 @@ class AlbumRepository extends ChangeNotifier {
       await _backfillFeatures();
       for (final e in [..._events]) {
         await refreshDayPlaces(e);
+      }
+      for (final e in [..._events]) {
+        await refreshRoutes(e);
       }
     }());
   }
@@ -101,7 +127,89 @@ class AlbumRepository extends ChangeNotifier {
         return; // offline or rate limited: try again next time
       }
     }
+    if (await _updateAutoLocation(e)) changedAny = true;
     if (changedAny) await changed(e);
+  }
+
+  /// Keeps an album's place in sync with its photos' towns unless the user
+  /// set it: "Lisboa", "Lisboa, Sintra & Cascais", or the region for longer
+  /// trips. Returns whether it changed.
+  Future<bool> _updateAutoLocation(AlbumEvent e) async {
+    if (e.locationManual) return false;
+    final towns = autoLocationTowns(e);
+    String text;
+    if (towns.length <= 3) {
+      text = joinPlaceNames(towns);
+    } else {
+      final located = e.photos.where((p) => p.hasLocation).toList();
+      final lats = located.map((p) => p.lat!).toList()..sort();
+      final lngs = located.map((p) => p.lng!).toList()..sort();
+      try {
+        final region = await geocoder.reverse(lats[lats.length ~/ 2], lngs[lngs.length ~/ 2], zoom: 5);
+        text = region?.name ?? joinPlaceNames(towns.take(3).toList());
+      } catch (_) {
+        return false; // offline: keep what we have
+      }
+    }
+    if (text == e.location) return false;
+    e.location = text;
+    return true;
+  }
+
+  // ---- routes ------------------------------------------------------------------
+
+  final Set<String> _routing = {};
+
+  /// Looks up real travel routes between the album's consecutive stops that
+  /// aren't cached yet (at most [maxLegs] per call).
+  Future<void> refreshRoutes(AlbumEvent e, {int maxLegs = 50}) async {
+    if (!settings.onlineLookups || !settings.realRoutes || _routing.contains(e.id)) return;
+    _routing.add(e.id);
+    try {
+      final visits = buildVisits(e);
+      var done = 0;
+      for (var i = 1; i < visits.length && done < maxLegs; i++) {
+        final a = visits[i - 1], b = visits[i];
+        final key = legKey(a.center.latitude, a.center.longitude, b.center.latitude, b.center.longitude);
+        if (e.routes.containsKey(key) || a.center == b.center) continue;
+        final mode = guessTravelMode(a.center, b.center, b.start.difference(a.end));
+        try {
+          e.routes[key] = await _findRoute(a.center, b.center, mode);
+        } catch (err) {
+          debugPrint('Route lookup failed: $err');
+          return; // offline or server trouble: try again next time
+        }
+        done++;
+        notifyListeners();
+        if (done % 5 == 0) await _save();
+      }
+      if (done > 0) await changed(e);
+    } finally {
+      _routing.remove(e.id);
+    }
+  }
+
+  Future<LegRoute> _findRoute(LatLng a, LatLng b, TravelMode mode, {bool manual = false}) async {
+    if (!mode.routed) return LegRoute(mode: mode, manual: manual);
+    final polyline = await routeFinder.route(a, b, mode);
+    if (polyline == null || !isPlausibleRoute(a, b, decodePolyline(polyline))) {
+      // No road connection or a huge detour: probably a ferry or train.
+      return LegRoute(mode: manual ? mode : TravelMode.straight, manual: manual);
+    }
+    return LegRoute(mode: mode, polyline: polyline, manual: manual);
+  }
+
+  /// The user says how a leg was travelled.
+  Future<void> setLegMode(AlbumEvent e, String key, LatLng a, LatLng b, TravelMode mode) async {
+    e.routes[key] = LegRoute(mode: mode, manual: true);
+    await changed(e);
+    if (!mode.routed || !settings.onlineLookups) return;
+    try {
+      e.routes[key] = await _findRoute(a, b, mode, manual: true);
+      await changed(e);
+    } catch (err) {
+      debugPrint('Route lookup failed: $err');
+    }
   }
 
   Future<void> setPhotoLocation(AlbumEvent e, Iterable<String> ids, GeoPlace place) async {
@@ -114,7 +222,7 @@ class AlbumRepository extends ChangeNotifier {
       e.dayPlaces.remove(dayKey(p.takenAt));
     }
     await changed(e);
-    unawaited(refreshDayPlaces(e));
+    unawaited(refreshDayPlaces(e).then((_) => refreshRoutes(e)));
   }
 
   /// Sets a moment's place; writes a description automatically if enabled.
@@ -123,6 +231,7 @@ class AlbumRepository extends ChangeNotifier {
     m.place = place;
     if (placeChanged) m.story = null;
     await changed(e);
+    if (placeChanged) unawaited(refreshRoutes(e));
     if (place != null && placeChanged && settings.autoStories && settings.canWriteStories) {
       try {
         await writeStory(e, m);
@@ -205,7 +314,11 @@ class AlbumRepository extends ChangeNotifier {
 
   /// Persist after the caller mutated an event (title, notes, captions, ...).
   Future<void> changed(AlbumEvent e, {bool styleChanged = false}) async {
-    if (styleChanged) EventStyle.invalidate(e.id);
+    if (styleChanged) {
+      EventStyle.invalidate(e.id);
+      // Other albums compare their colours with this one.
+      EventStyle.invalidateComparisons();
+    }
     notifyListeners();
     await _save();
   }
@@ -339,7 +452,7 @@ class AlbumRepository extends ChangeNotifier {
     e.normalize();
     if (e.autoStack) _detect(e);
     await changed(e, styleChanged: true);
-    unawaited(refreshDayPlaces(e));
+    unawaited(refreshDayPlaces(e).then((_) => refreshRoutes(e)));
     return failed;
   }
 
@@ -461,3 +574,20 @@ class FolderSyncResult {
         if (failed > 0) '$failed could not be read',
       ].join(', ');
 }
+
+/// Distinct town names of an album's days, in visiting order.
+List<String> autoLocationTowns(AlbumEvent e) {
+  final towns = <String>[];
+  for (final day in groupByDay(e.photos)) {
+    final name = e.dayPlaces[day.key];
+    if (name != null && name.isNotEmpty && !towns.contains(name)) towns.add(name);
+  }
+  return towns;
+}
+
+/// "A", "A & B", "A, B & C".
+String joinPlaceNames(List<String> names) => switch (names.length) {
+      0 => '',
+      1 => names.single,
+      _ => '${names.sublist(0, names.length - 1).join(', ')} & ${names.last}',
+    };

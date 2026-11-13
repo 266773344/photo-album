@@ -6,7 +6,10 @@ each album gets background colours derived from its own photos.
 
 ## Features
 
-- **Home screen** with one card per album (cover mosaic, dates, colour swatches).
+- **Home screen** with one card per album (cover photo, place, dates, and the
+  album's signature colours: vivid colours typical of this trip, with sky,
+  stone and foliage tones discounted and colours common to all your albums
+  ranked lower, `signatureColors` in `lib/theme/palette.dart`).
 - **Automatic collages** — `lib/layout/collage_layout.dart` builds each band of
   the collage as a row/column tree, so photos fit with no cropping. Layouts are
   seeded per album (stable between launches); *Shuffle layout* re-rolls them.
@@ -25,9 +28,21 @@ each album gets background colours derived from its own photos.
 - **Moments** — optional titled chapters within a day ("Breakfast at Café Lua")
   with a note, shown as a tinted card where their first photo falls in the
   timeline. Photos don't have to belong to one (`lib/models/grouping.dart`).
-- **Maps** — GPS from EXIF (or set by hand via selection → ⋯ → *Set location*)
-  feeds a route map on the album page, a full-screen map with photo markers,
-  and town names next to each day (OpenStreetMap / Nominatim, `lib/services/geocoding.dart`).
+- **Journey map** — photos close in place and time (≈200 m, 3 h) form a *stop*
+  (`lib/models/visits.dart`); photos and moments placed by hand count too, in
+  time order. The album header shows the journey with a photo pin per stop
+  (merged when they overlap, with a count). While you scroll, the current stop
+  is highlighted and the map follows. Tapping a pin jumps to its photos; the map
+  button in the header hides the map (the cover photo returns). Town names next
+  to each day and the album place come from OpenStreetMap / Nominatim
+  (`lib/services/geocoding.dart`); the album place is automatic unless chosen
+  on the map or typed in the album editor.
+- **Real routes** — lines between stops follow roads or footpaths
+  (OSRM on routing.openstreetmap.de, `lib/services/routing.dart`; only stop
+  coordinates are sent, results are stored with the album). Long fast hops are
+  drawn as flight arcs; legs without a plausible route stay dashed straight lines.
+  There is no free train routing: tap a line on the full map to mark it as train,
+  ferry, flight, car or walk. Switch off in Settings.
 - **Places & AI descriptions** — moments can have a place (suggested from the
   photos' GPS, searched by name, tapped on the map, or pasted as a Google Maps
   link). With an Anthropic API key in Settings, Claude searches the web and writes

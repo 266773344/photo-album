@@ -43,6 +43,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             value: s.onlineLookups,
             onChanged: (v) => repo.updateSettings(s.copyWith(onlineLookups: v)),
           ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Draw real travel routes'),
+            subtitle: const Text(
+              'Lines on the map follow roads and footpaths (OpenStreetMap routing, routing.openstreetmap.de). '
+              'Only the coordinates of the stops are sent. Train and boat trips can be set by tapping a line on the map.',
+            ),
+            value: s.realRoutes && s.onlineLookups,
+            onChanged: s.onlineLookups ? (v) => repo.updateSettings(s.copyWith(realRoutes: v)) : null,
+          ),
           const Divider(height: 32),
           Text('Place descriptions (AI)', style: t.textTheme.titleMedium),
           const SizedBox(height: 4),

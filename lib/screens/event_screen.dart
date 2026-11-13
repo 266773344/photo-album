@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
@@ -22,6 +23,8 @@ import 'place_picker.dart';
 import 'theme_picker.dart';
 
 /// Opens the album's map, optionally centred on [focus].
+String _albumRouteName(String eventId) => 'album/$eventId';
+
 void openAlbumMap(BuildContext context, AlbumEvent e, {LatLng? focus}) {
   Navigator.of(context).push(MaterialPageRoute<void>(
     builder: (_) => Theme(
@@ -29,7 +32,11 @@ void openAlbumMap(BuildContext context, AlbumEvent e, {LatLng? focus}) {
       child: AlbumMapScreen(
         eventId: e.id,
         focus: focus,
-        onOpenPhoto: (ctx, p) => openPhotoViewer(ctx, e, p),
+        // Tapping a stop goes back to the album, scrolled to its photos.
+        onTapVisit: (ctx, visit) {
+          AlbumScope.read(ctx).requestFocus(e, [for (final p in visit.photos) p.id]);
+          Navigator.of(ctx).popUntil((r) => r.settings.name == _albumRouteName(e.id) || r.isFirst);
+        },
       ),
     ),
   ));
@@ -46,6 +53,7 @@ void openPhotoViewer(BuildContext context, AlbumEvent e, Photo p) {
 
 void openEvent(BuildContext context, AlbumEvent e, {bool pickPhotos = false}) {
   Navigator.of(context).push(MaterialPageRoute<void>(
+    settings: RouteSettings(name: _albumRouteName(e.id)),
     builder: (_) => EventScreen(eventId: e.id, pickPhotosOnOpen: pickPhotos),
   ));
 }
@@ -69,6 +77,123 @@ class _EventScreenState extends State<EventScreen> {
   /// Selected photo ids. Non-empty = selection mode.
   final Set<String> _selected = {};
 
+  final _scroll = ScrollController();
+  final _cells = CellRegistry();
+
+  /// The journey stop of the photos at the top of the screen (null = top of
+  /// the album, the map shows the whole trip).
+  int? _currentVisit;
+  Set<String> _highlight = {};
+  AlbumGeo? _geo;
+  Timer? _scrollCheck;
+  ValueNotifier<(String, List<String>)?>? _focusRequests;
+
+  static const _journeyExpanded = 300.0;
+  static const _journeyCollapsed = 150.0;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_focusRequests == null) {
+      _focusRequests = AlbumScope.read(context).focusRequest..addListener(_onFocusRequest);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _onFocusRequest());
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusRequests?.removeListener(_onFocusRequest);
+    _scrollCheck?.cancel();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _onFocusRequest() {
+    final req = _focusRequests?.value;
+    if (req == null || req.$1 != widget.eventId || !mounted) return;
+    _focusRequests!.value = null;
+    // Wait until routes above this one are gone.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToPhotos(req.$2));
+  }
+
+  /// Scrolls the album to the first of [ids] and outlines them briefly.
+  Future<void> _scrollToPhotos(List<String> ids) async {
+    final e = _event;
+    if (e == null || ids.isEmpty || !_scroll.hasClients) return;
+    // Position of every photo in page order (days → blocks → cells).
+    final order = <String, int>{};
+    for (final day in buildAlbumStructure(e)) {
+      for (final block in day.blocks) {
+        for (final item in block.items) {
+          for (final id in item.ids) {
+            order[id] = order.length;
+          }
+        }
+      }
+    }
+    final targets = ids.where(order.containsKey).toList()..sort((a, b) => order[a]!.compareTo(order[b]!));
+    if (targets.isEmpty) return;
+    final target = targets.first;
+
+    // The page is built lazily: step towards the target until its cell exists.
+    for (var i = 0; i < 80 && mounted; i++) {
+      final ctx = _cells[target];
+      if (ctx != null && ctx.mounted) {
+        setState(() => _highlight = ids.toSet());
+        await Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.3,
+          duration: const Duration(milliseconds: 550),
+          curve: Curves.easeInOutCubic,
+        );
+        break;
+      }
+      final visible = [for (final entry in _cells.entries) order[entry.key] ?? 0];
+      if (visible.isEmpty) break;
+      final down = visible.reduce(math.max) < order[target]!;
+      final pos = _scroll.position;
+      final next = (pos.pixels + pos.viewportDimension * 0.8 * (down ? 1 : -1)).clamp(pos.minScrollExtent, pos.maxScrollExtent);
+      if (next == pos.pixels) break;
+      pos.jumpTo(next);
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 1800));
+    if (mounted) setState(() => _highlight = {});
+  }
+
+  // Scroll notifications arrive before the frame is laid out, so cell
+  // positions are only read a moment later (at most every 100 ms).
+  void _onScroll() {
+    _scrollCheck ??= Timer(const Duration(milliseconds: 100), () {
+      _scrollCheck = null;
+      if (mounted) _updateCurrentVisit();
+    });
+  }
+
+  /// Finds the journey stop of the photos just below the header.
+  void _updateCurrentVisit() {
+    final geo = _geo;
+    if (geo == null || geo.isEmpty || !_scroll.hasClients) return;
+    int? visit;
+    if (_scroll.offset > _journeyExpanded - _journeyCollapsed) {
+      final headerBottom = MediaQuery.paddingOf(context).top + _journeyCollapsed;
+      String? topId;
+      var topY = double.infinity;
+      for (final entry in _cells.entries) {
+        final box = entry.value.mounted ? entry.value.findRenderObject() as RenderBox? : null;
+        if (box == null || !box.attached || !box.hasSize) continue;
+        final y = box.localToGlobal(Offset.zero).dy;
+        // The first cell whose lower half is below the header.
+        if (y + box.size.height / 2 > headerBottom && y < topY) {
+          topY = y;
+          topId = entry.key;
+        }
+      }
+      visit = topId == null ? _currentVisit : geo.visitOfPhoto(topId);
+    }
+    if (visit != _currentVisit) setState(() => _currentVisit = visit);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -78,6 +203,8 @@ class _EventScreenState extends State<EventScreen> {
         _addPhotos();
       } else {
         _syncFolders();
+        final e = _event;
+        if (e != null) unawaited(AlbumScope.read(context).refreshRoutes(e));
       }
     });
   }
@@ -360,11 +487,15 @@ class _EventScreenState extends State<EventScreen> {
   Future<void> _editDetails(AlbumEvent e) async {
     final d = await showEventEditor(context, existing: e);
     if (d == null || !mounted) return;
+    final wasManual = e.locationManual;
     e
       ..title = d.title
       ..location = d.location
+      ..locationManual = d.locationManual
       ..description = d.description;
     await _persist(e);
+    // Switched back to automatic: work the place out from the photos again.
+    if (wasManual && !d.locationManual && mounted) unawaited(AlbumScope.read(context).refreshDayPlaces(e));
   }
 
   Future<void> _editDayNote(AlbumEvent e, DayView day) async {
@@ -434,8 +565,11 @@ class _EventScreenState extends State<EventScreen> {
       onToggle: _toggle,
       onStartSelection: _startSelection,
       flat: airy,
+      highlighted: _highlight,
+      registry: _cells,
     );
-    final geo = AlbumGeo(e);
+    final geo = _geo = AlbumGeo(e);
+    final journeyMap = !geo.isEmpty && e.showJourneyMap;
 
     // Background colours flow from one day's tint into the next.
     final tints = [for (final d in days) style.dayTints[d.key] ?? s.surface];
@@ -450,9 +584,15 @@ class _EventScreenState extends State<EventScreen> {
         child: Builder(builder: (context) {
           return Scaffold(
             backgroundColor: s.surface,
-            body: CustomScrollView(
+            body: NotificationListener<ScrollUpdateNotification>(
+              onNotification: (n) {
+                if (journeyMap && n.depth == 0) _onScroll();
+                return false;
+              },
+              child: CustomScrollView(
+              controller: _scroll,
               slivers: [
-                _header(context, e, style),
+                _header(context, e, style, geo, journeyMap),
                 DecoratedSliver(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -463,7 +603,12 @@ class _EventScreenState extends State<EventScreen> {
                   ),
                   sliver: SliverToBoxAdapter(
                     child: _Constrained(
-                      child: _InfoSection(event: e, style: style, geo: geo, onOpenMap: () => openAlbumMap(context, e)),
+                      child: _InfoSection(
+                        event: e,
+                        style: style,
+                        geo: journeyMap ? null : geo,
+                        onOpenMap: () => openAlbumMap(context, e),
+                      ),
                     ),
                   ),
                 ),
@@ -509,6 +654,7 @@ class _EventScreenState extends State<EventScreen> {
                   ),
               ],
             ),
+            ),
             bottomNavigationBar: _selected.isNotEmpty
                 ? _SelectionBar(
                     event: e,
@@ -528,13 +674,25 @@ class _EventScreenState extends State<EventScreen> {
     );
   }
 
-  Widget _header(BuildContext context, AlbumEvent e, EventStyle style) {
+  Widget _header(BuildContext context, AlbumEvent e, EventStyle style, AlbumGeo geo, bool journeyMap) {
     final s = style.scheme;
     final cover = e.cover;
     final height = math.min(440.0, MediaQuery.sizeOf(context).height * 0.52);
     final busy = AlbumScope.of(context).importProgress.containsKey(e.id);
 
     final actions = <Widget>[
+      if (!geo.isEmpty)
+        IconButton.filledTonal(
+          tooltip: journeyMap ? 'Hide map' : 'Show map',
+          isSelected: journeyMap,
+          onPressed: () {
+            e.showJourneyMap = !e.showJourneyMap;
+            _currentVisit = null;
+            AlbumScope.read(context).changed(e);
+          },
+          icon: const Icon(Icons.map_outlined),
+          selectedIcon: const Icon(Icons.map),
+        ),
       IconButton.filledTonal(
         tooltip: 'Add photos',
         onPressed: busy ? null : _addPhotos,
@@ -586,6 +744,68 @@ class _EventScreenState extends State<EventScreen> {
       ),
       const SizedBox(width: 8),
     ];
+
+    if (journeyMap) {
+      // The journey map, pinned as a strip while scrolling; its pin follows
+      // the photos on screen.
+      return SliverAppBar(
+        pinned: true,
+        expandedHeight: _journeyExpanded,
+        collapsedHeight: _journeyCollapsed,
+        backgroundColor: s.surface,
+        surfaceTintColor: Colors.transparent,
+        leading: Padding(
+          padding: const EdgeInsets.all(4),
+          child: IconButton.filledTonal(onPressed: () => Navigator.maybePop(context), icon: const BackButtonIcon()),
+        ),
+        actions: actions,
+        flexibleSpace: Stack(
+          fit: StackFit.expand,
+          children: [
+            JourneyHeaderMap(
+              geo: geo,
+              current: _currentVisit,
+              onTapVisit: (v) => _scrollToPhotos([for (final p in v.photos) p.id]),
+              onOpen: () => openAlbumMap(
+                context,
+                e,
+                focus: _currentVisit == null ? null : geo.visits[_currentVisit!].center,
+              ),
+            ),
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 10,
+              child: IgnorePointer(
+                child: Align(
+                  alignment: Alignment.bottomLeft,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: s.surface.withValues(alpha: 0.92),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      e.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: s.onSurface, fontWeight: FontWeight.w700, fontSize: 18),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 8,
+              bottom: 4,
+              child: IgnorePointer(
+                child: Text('© OpenStreetMap', style: TextStyle(fontSize: 9.5, color: s.onSurface.withValues(alpha: 0.7))),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     if (cover == null) {
       return SliverAppBar.large(title: Text(e.title), backgroundColor: s.surface, actions: actions);
@@ -650,7 +870,7 @@ class _InfoSection extends StatelessWidget {
   const _InfoSection({required this.event, required this.style, required this.geo, required this.onOpenMap});
   final AlbumEvent event;
   final EventStyle style;
-  final AlbumGeo geo;
+  final AlbumGeo? geo;
   final VoidCallback onOpenMap;
 
   @override
@@ -673,7 +893,7 @@ class _InfoSection extends StatelessWidget {
             const SizedBox(height: 14),
             Text(event.description, style: t.textTheme.bodyLarge?.copyWith(height: 1.55, color: s.onSurface)),
           ],
-          if (!geo.isEmpty) ...[
+          if (geo case final geo? when !geo.isEmpty) ...[
             const SizedBox(height: 16),
             AlbumMapCard(geo: geo, onOpen: onOpenMap),
           ],
