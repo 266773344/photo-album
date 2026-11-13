@@ -7,15 +7,19 @@ import 'package:image/image.dart' as img;
 
 import '../models/models.dart';
 import '../theme/palette.dart';
+import 'similarity.dart';
+
+export 'similarity.dart' show PhotoFeatures;
 
 /// Result of preparing one picked image for the album.
 class ProcessedPhoto {
-  ProcessedPhoto(this.thumbJpeg, this.width, this.height, this.palette, this.takenAt);
+  ProcessedPhoto(this.thumbJpeg, this.width, this.height, this.palette, this.takenAt, this.features);
   final Uint8List thumbJpeg;
   final int width;
   final int height;
   final List<PaletteColor> palette;
   final DateTime? takenAt;
+  final PhotoFeatures features;
 }
 
 /// Longest edge of stored thumbnails used in the collages.
@@ -43,12 +47,30 @@ Future<ProcessedPhoto> processPhoto(Uint8List bytes) async {
   // JPEG encoding and colour analysis are CPU heavy: run them off the UI
   // isolate on Android (on the web `compute` runs inline).
   final result = await compute(_encodeAndAnalyse, (data.buffer.asUint8List(), w, h));
-  return ProcessedPhoto(result.$1, w, h, result.$2, takenAt);
+  return ProcessedPhoto(result.$1, w, h, result.$2, takenAt, result.$3);
 }
 
-(Uint8List, List<PaletteColor>) _encodeAndAnalyse((Uint8List, int, int) args) {
+/// Computes similarity features from an already stored thumbnail (for photos
+/// imported before similarity detection existed).
+Future<PhotoFeatures> featuresFromThumb(Uint8List jpeg) async {
+  final buffer = await ui.ImmutableBuffer.fromUint8List(jpeg);
+  final codec = await ui.instantiateImageCodecWithSize(buffer, getTargetSize: (w, h) {
+    final scale = math.min(1.0, 320 / math.max(w, h));
+    return ui.TargetImageSize(width: (w * scale).round(), height: (h * scale).round());
+  });
+  final image = (await codec.getNextFrame()).image;
+  final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+  final w = image.width, h = image.height;
+  image.dispose();
+  codec.dispose();
+  if (data == null) throw StateError('Could not decode thumbnail');
+  return computeFeatures(data.buffer.asUint8List(), w, h);
+}
+
+(Uint8List, List<PaletteColor>, PhotoFeatures) _encodeAndAnalyse((Uint8List, int, int) args) {
   final (rgba, w, h) = args;
   final palette = extractPalette(rgba, w, h);
+  final features = computeFeatures(rgba, w, h);
   final image = img.Image.fromBytes(
     width: w,
     height: h,
@@ -56,7 +78,7 @@ Future<ProcessedPhoto> processPhoto(Uint8List bytes) async {
     numChannels: 4,
     order: img.ChannelOrder.rgba,
   );
-  return (img.encodeJpg(image, quality: 86), palette);
+  return (img.encodeJpg(image, quality: 86), palette, features);
 }
 
 Future<DateTime?> _readExifDate(Uint8List bytes) async {

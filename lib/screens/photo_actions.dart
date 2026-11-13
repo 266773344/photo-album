@@ -1,11 +1,13 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../models/grouping.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
 
-/// Caption / cover / delete actions for a single photo.
+/// Per-photo actions (used by the fullscreen viewer).
 /// Returns true if the photo was deleted.
 Future<bool> showPhotoActions(BuildContext context, AlbumEvent e, Photo p) async {
+  final stack = e.stackOf(p.id);
   final action = await showModalBottomSheet<String>(
     context: context,
     showDragHandle: true,
@@ -24,6 +26,18 @@ Future<bool> showPhotoActions(BuildContext context, AlbumEvent e, Photo p) async
             enabled: e.cover?.id != p.id,
             onTap: () => Navigator.pop(context, 'cover'),
           ),
+          if (stack != null) ...[
+            ListTile(
+              leading: const Icon(Icons.first_page),
+              title: const Text('Show first in carousel'),
+              onTap: () => Navigator.pop(context, 'stackcover'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.call_split),
+              title: const Text('Take out of carousel'),
+              onTap: () => Navigator.pop(context, 'unstack'),
+            ),
+          ],
           ListTile(
             leading: const Icon(Icons.delete_outline),
             title: const Text('Remove from album'),
@@ -40,15 +54,18 @@ Future<bool> showPhotoActions(BuildContext context, AlbumEvent e, Photo p) async
       final text = await editTextDialog(context, title: 'Caption', initial: p.caption, hint: 'Say something about this photo');
       if (text == null) return false;
       p.caption = text;
-      await repo.changed(e);
     case 'cover':
       e.coverPhotoId = p.id;
-      await repo.changed(e);
+    case 'stackcover':
+      stack!.coverId = p.id;
+    case 'unstack':
+      e.removeFromStack(p.id);
     case 'delete':
       final ok = await confirmDialog(context, title: 'Remove photo?', message: 'The photo will be removed from this album.', action: 'Remove');
       if (!ok) return false;
       await repo.deletePhoto(e, p);
       return true;
   }
+  await repo.changed(e);
   return false;
 }

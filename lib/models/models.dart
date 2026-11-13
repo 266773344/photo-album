@@ -28,6 +28,9 @@ class Photo {
     required this.takenAt,
     required this.palette,
     this.caption = '',
+    this.dhash,
+    this.sharpness,
+    this.exactTime = true,
   });
 
   final String id;
@@ -42,6 +45,17 @@ class Photo {
   final List<PaletteColor> palette;
   String caption;
 
+  /// 64-bit perceptual difference hash as 16 hex chars (see similarity.dart).
+  /// Null for photos imported before hashing existed, until backfilled.
+  String? dhash;
+
+  /// Relative sharpness (variance of the Laplacian); used to pick the best
+  /// shot of a carousel.
+  double? sharpness;
+
+  /// Whether [takenAt] came from EXIF (reliable) rather than a file date.
+  bool exactTime;
+
   double get aspect => width / height;
 
   String get thumbKey => 'thumb_$id';
@@ -54,9 +68,15 @@ class Photo {
         'takenAt': takenAt.toIso8601String(),
         'palette': palette.map((p) => p.toJson()).toList(),
         'caption': caption,
+        if (dhash != null) 'dh': dhash,
+        if (sharpness != null) 'sh': sharpness,
+        if (!exactTime) 'et': false,
       };
 
   factory Photo.fromJson(Map<String, dynamic> j) => Photo(
+        dhash: j['dh'] as String?,
+        sharpness: (j['sh'] as num?)?.toDouble(),
+        exactTime: j['et'] as bool? ?? true,
         id: j['id'] as String,
         width: j['w'] as int,
         height: j['h'] as int,
@@ -115,6 +135,49 @@ class EventThemeSettings {
       );
 }
 
+/// Several very similar photos shown as one swipeable carousel in a collage.
+class PhotoStack {
+  PhotoStack({required this.id, required this.photoIds, this.coverId, this.auto = false});
+
+  final String id;
+  final List<String> photoIds;
+
+  /// Photo shown first; null = the sharpest one.
+  String? coverId;
+
+  /// Created by similarity detection (vs. grouped by the user).
+  final bool auto;
+
+  Map<String, dynamic> toJson() => {'id': id, 'photos': photoIds, 'cover': coverId, 'auto': auto};
+
+  factory PhotoStack.fromJson(Map<String, dynamic> j) => PhotoStack(
+        id: j['id'] as String,
+        photoIds: (j['photos'] as List).cast<String>().toList(),
+        coverId: j['cover'] as String?,
+        auto: j['auto'] as bool? ?? false,
+      );
+}
+
+/// A titled sub-section of a day ("Breakfast at Café Lua"), holding any
+/// subset of photos. Shown where its earliest photo falls in the timeline.
+class Moment {
+  Moment({required this.id, required this.title, this.note = '', required this.photoIds});
+
+  final String id;
+  String title;
+  String note;
+  final List<String> photoIds;
+
+  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'note': note, 'photos': photoIds};
+
+  factory Moment.fromJson(Map<String, dynamic> j) => Moment(
+        id: j['id'] as String,
+        title: j['title'] as String? ?? '',
+        note: j['note'] as String? ?? '',
+        photoIds: (j['photos'] as List).cast<String>().toList(),
+      );
+}
+
 class AlbumEvent {
   AlbumEvent({
     required this.id,
@@ -127,9 +190,25 @@ class AlbumEvent {
     Map<String, String>? dayNotes,
     this.theme = const EventThemeSettings(),
     int? layoutSeed,
+    List<PhotoStack>? stacks,
+    List<Moment>? moments,
+    Set<String>? noAutoStack,
+    this.autoStack = true,
   })  : photos = photos ?? [],
         dayNotes = dayNotes ?? {},
+        stacks = stacks ?? [],
+        moments = moments ?? [],
+        noAutoStack = noAutoStack ?? {},
         layoutSeed = layoutSeed ?? createdAt.microsecondsSinceEpoch & 0x7fffffff;
+
+  final List<PhotoStack> stacks;
+  final List<Moment> moments;
+
+  /// Photos the user pulled out of a carousel; auto-detection leaves them alone.
+  final Set<String> noAutoStack;
+
+  /// Whether similar photos are grouped into carousels automatically.
+  bool autoStack;
 
   final String id;
   String title;
@@ -170,6 +249,10 @@ class AlbumEvent {
         'dayNotes': dayNotes,
         'theme': theme.toJson(),
         'layoutSeed': layoutSeed,
+        'stacks': stacks.map((s) => s.toJson()).toList(),
+        'moments': moments.map((m) => m.toJson()).toList(),
+        'noAutoStack': noAutoStack.toList(),
+        'autoStack': autoStack,
       };
 
   factory AlbumEvent.fromJson(Map<String, dynamic> j) => AlbumEvent(
@@ -187,6 +270,10 @@ class AlbumEvent {
             ? const EventThemeSettings()
             : EventThemeSettings.fromJson(j['theme'] as Map<String, dynamic>),
         layoutSeed: j['layoutSeed'] as int?,
+        stacks: (j['stacks'] as List?)?.map((e) => PhotoStack.fromJson(e as Map<String, dynamic>)).toList(),
+        moments: (j['moments'] as List?)?.map((e) => Moment.fromJson(e as Map<String, dynamic>)).toList(),
+        noAutoStack: (j['noAutoStack'] as List?)?.cast<String>().toSet(),
+        autoStack: j['autoStack'] as bool? ?? true,
       );
 }
 

@@ -37,7 +37,19 @@ const _fallbackSeed = Color(0xFF6B7FA3);
 
 /// Everything the UI needs to paint one event in its own colours.
 class EventStyle {
-  EventStyle._(this.scheme, this.seed, this.palette, this.dayTints);
+  EventStyle._(this.scheme, this.seed, this.palette, this.dayTints, this._photoColors);
+
+  /// Whether colours follow the photos (auto theme) or a fixed choice.
+  final bool _photoColors;
+
+  /// Card background for a moment, tinted by its own photos when the album
+  /// uses automatic colours.
+  Color momentTint(List<Photo> photos) {
+    final base = scheme.surfaceContainerLowest;
+    final argb = _photoColors ? chooseSeed(mergePalettes(photos.map((p) => p.palette))) : null;
+    final tint = argb == null ? scheme.secondaryContainer : Color(argb);
+    return Color.lerp(base, tint, isDark ? 0.14 : 0.2)!.withValues(alpha: 0.82);
+  }
 
   final ColorScheme scheme;
   final Color seed;
@@ -96,7 +108,7 @@ class EventStyle {
       tints[day.key] = Color.lerp(scheme.surface, daySeed, dark ? 0.16 : 0.22)!;
     }
 
-    return EventStyle._(scheme, seed, merged.map((c) => Color(c.argb)).toList(), tints);
+    return EventStyle._(scheme, seed, merged.map((c) => Color(c.argb)).toList(), tints, useDayColors);
   }
 }
 

@@ -16,6 +16,15 @@ each album gets background colours derived from its own photos.
   scroll. You can override this with mood presets (Beach, Mountains, City, …),
   a custom colour, and light/dark mode.
 - **Grouped by day** using the EXIF capture date (falls back to file date).
+- **Similar-photo carousels** — bursts and near-duplicates (perceptual dHash +
+  palette check, only among photos taken within ~2 minutes) are combined into one
+  swipeable collage cell showing the sharpest shot first
+  (`lib/data/similarity.dart`). Toggle per album via *Group similar photos*.
+- **Selection mode** — long-press a photo, tap more, then: *Moment*, *Carousel*,
+  *Remove*, or (⋯) caption / cover / ungroup / take out of moment.
+- **Moments** — optional titled chapters within a day ("Breakfast at Café Lua")
+  with a note, shown as a tinted card where their first photo falls in the
+  timeline. Photos don't have to belong to one (`lib/models/grouping.dart`).
 - **Captions & notes** — album title/location/story, a note per day, and a
   caption per photo (long-press a photo).
 - **Fullscreen viewer** — swipe between photos, pinch or double-tap to zoom.
