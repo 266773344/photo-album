@@ -31,7 +31,27 @@ class Photo {
     this.dhash,
     this.sharpness,
     this.exactTime = true,
+    this.lat,
+    this.lng,
+    this.locationManual = false,
+    this.assetId,
+    this.folderId,
   });
+
+  /// GPS position (from EXIF or set by the user).
+  double? lat;
+  double? lng;
+  bool locationManual;
+
+  bool get hasLocation => lat != null && lng != null;
+
+  /// Id of the original in the device gallery (Android). When set, the app
+  /// stores only the preview and loads the original from the gallery.
+  final String? assetId;
+
+  /// The linked gallery folder this photo came from ([FolderLink.id]); null
+  /// for photos picked by hand.
+  String? folderId;
 
   final String id;
 
@@ -71,9 +91,19 @@ class Photo {
         if (dhash != null) 'dh': dhash,
         if (sharpness != null) 'sh': sharpness,
         if (!exactTime) 'et': false,
+        if (lat != null) 'lat': lat,
+        if (lng != null) 'lng': lng,
+        if (locationManual) 'lm': true,
+        if (assetId != null) 'aid': assetId,
+        if (folderId != null) 'fid': folderId,
       };
 
   factory Photo.fromJson(Map<String, dynamic> j) => Photo(
+        lat: (j['lat'] as num?)?.toDouble(),
+        lng: (j['lng'] as num?)?.toDouble(),
+        locationManual: j['lm'] as bool? ?? false,
+        assetId: j['aid'] as String?,
+        folderId: j['fid'] as String?,
         dhash: j['dh'] as String?,
         sharpness: (j['sh'] as num?)?.toDouble(),
         exactTime: j['et'] as bool? ?? true,
@@ -158,23 +188,117 @@ class PhotoStack {
       );
 }
 
+/// A named point on the map (a café, a viewpoint, a town).
+class GeoPlace {
+  const GeoPlace({required this.name, this.address = '', required this.lat, required this.lng});
+
+  final String name;
+
+  /// Human-readable address / context ("Rua da Rosa 12, Lisbon, Portugal").
+  final String address;
+  final double lat;
+  final double lng;
+
+  Map<String, dynamic> toJson() => {'name': name, 'address': address, 'lat': lat, 'lng': lng};
+
+  factory GeoPlace.fromJson(Map<String, dynamic> j) => GeoPlace(
+        name: j['name'] as String,
+        address: j['address'] as String? ?? '',
+        lat: (j['lat'] as num).toDouble(),
+        lng: (j['lng'] as num).toDouble(),
+      );
+}
+
+/// A short AI-written flavour text about a place, with the web sources it
+/// was based on.
+class PlaceStory {
+  const PlaceStory({required this.text, this.sources = const [], required this.createdAt});
+
+  final String text;
+
+  /// Source URLs the text is grounded in.
+  final List<String> sources;
+  final DateTime createdAt;
+
+  Map<String, dynamic> toJson() => {'text': text, 'sources': sources, 'at': createdAt.toIso8601String()};
+
+  factory PlaceStory.fromJson(Map<String, dynamic> j) => PlaceStory(
+        text: j['text'] as String,
+        sources: (j['sources'] as List?)?.cast<String>() ?? const [],
+        createdAt: DateTime.parse(j['at'] as String),
+      );
+}
+
 /// A titled sub-section of a day ("Breakfast at Café Lua"), holding any
 /// subset of photos. Shown where its earliest photo falls in the timeline.
 class Moment {
-  Moment({required this.id, required this.title, this.note = '', required this.photoIds});
+  Moment({required this.id, required this.title, this.note = '', required this.photoIds, this.place, this.story});
 
   final String id;
   String title;
   String note;
   final List<String> photoIds;
+  GeoPlace? place;
+  PlaceStory? story;
 
-  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'note': note, 'photos': photoIds};
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'note': note,
+        'photos': photoIds,
+        if (place != null) 'place': place!.toJson(),
+        if (story != null) 'story': story!.toJson(),
+      };
 
   factory Moment.fromJson(Map<String, dynamic> j) => Moment(
         id: j['id'] as String,
         title: j['title'] as String? ?? '',
         note: j['note'] as String? ?? '',
         photoIds: (j['photos'] as List).cast<String>().toList(),
+        place: j['place'] == null ? null : GeoPlace.fromJson(j['place'] as Map<String, dynamic>),
+        story: j['story'] == null ? null : PlaceStory.fromJson(j['story'] as Map<String, dynamic>),
+      );
+}
+
+/// How densely the collages are packed.
+enum LayoutStyle { airy, compact }
+
+/// App-wide settings (stored with the albums, on this device only).
+class AppSettings {
+  const AppSettings({
+    this.apiKey = '',
+    this.model = 'claude-opus-5-5',
+    this.onlineLookups = true,
+    this.autoStories = false,
+  });
+
+  /// The user's own Anthropic API key, used for place descriptions.
+  final String apiKey;
+  final String model;
+
+  /// Look up place names / search places via OpenStreetMap.
+  final bool onlineLookups;
+
+  /// Write a place description automatically when a moment gets a place.
+  final bool autoStories;
+
+  bool get canWriteStories => apiKey.trim().isNotEmpty;
+
+  AppSettings copyWith({String? apiKey, String? model, bool? onlineLookups, bool? autoStories}) => AppSettings(
+        apiKey: apiKey ?? this.apiKey,
+        model: model ?? this.model,
+        onlineLookups: onlineLookups ?? this.onlineLookups,
+        autoStories: autoStories ?? this.autoStories,
+      );
+
+  Map<String, dynamic> toJson() =>
+      {'apiKey': apiKey, 'model': model, 'onlineLookups': onlineLookups, 'autoStories': autoStories};
+
+  factory AppSettings.fromJson(Map<String, dynamic> j) => AppSettings(
+        apiKey: j['apiKey'] as String? ?? '',
+        model: j['model'] as String? ?? 'claude-opus-5-5',
+        onlineLookups: j['onlineLookups'] as bool? ?? true,
+        autoStories: j['autoStories'] as bool? ?? false,
       );
 }
 
@@ -194,7 +318,14 @@ class AlbumEvent {
     List<Moment>? moments,
     Set<String>? noAutoStack,
     this.autoStack = true,
+    Map<String, String>? dayPlaces,
+    this.layout = LayoutStyle.airy,
+    List<FolderLink>? linkedFolders,
+    Set<String>? excludedAssets,
   })  : photos = photos ?? [],
+        linkedFolders = linkedFolders ?? [],
+        excludedAssets = excludedAssets ?? {},
+        dayPlaces = dayPlaces ?? {},
         dayNotes = dayNotes ?? {},
         stacks = stacks ?? [],
         moments = moments ?? [],
@@ -209,6 +340,17 @@ class AlbumEvent {
 
   /// Whether similar photos are grouped into carousels automatically.
   bool autoStack;
+
+  /// Town / area name per day (keyed by [dayKey]), looked up from GPS.
+  final Map<String, String> dayPlaces;
+
+  LayoutStyle layout;
+
+  /// Gallery folders this album stays in sync with.
+  final List<FolderLink> linkedFolders;
+
+  /// Gallery photos the user removed from the album; folder sync skips them.
+  final Set<String> excludedAssets;
 
   final String id;
   String title;
@@ -253,6 +395,10 @@ class AlbumEvent {
         'moments': moments.map((m) => m.toJson()).toList(),
         'noAutoStack': noAutoStack.toList(),
         'autoStack': autoStack,
+        'dayPlaces': dayPlaces,
+        'layout': layout.name,
+        if (linkedFolders.isNotEmpty) 'lf': linkedFolders.map((l) => l.toJson()).toList(),
+        if (excludedAssets.isNotEmpty) 'xa': excludedAssets.toList(),
       };
 
   factory AlbumEvent.fromJson(Map<String, dynamic> j) => AlbumEvent(
@@ -274,6 +420,30 @@ class AlbumEvent {
         moments: (j['moments'] as List?)?.map((e) => Moment.fromJson(e as Map<String, dynamic>)).toList(),
         noAutoStack: (j['noAutoStack'] as List?)?.cast<String>().toSet(),
         autoStack: j['autoStack'] as bool? ?? true,
+        dayPlaces: (j['dayPlaces'] as Map?)?.cast<String, String>(),
+        layout: LayoutStyle.values.asNameMap()[j['layout']] ?? LayoutStyle.airy,
+        linkedFolders: (j['lf'] as List?)?.map((e) => FolderLink.fromJson(e as Map<String, dynamic>)).toList(),
+        excludedAssets: (j['xa'] as List?)?.cast<String>().toSet(),
+      );
+}
+
+/// A device gallery folder whose photos an album mirrors.
+class FolderLink {
+  FolderLink({required this.id, required this.name, this.lastSync});
+  final String id;
+  String name;
+  DateTime? lastSync;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        if (lastSync != null) 'sync': lastSync!.toIso8601String(),
+      };
+
+  factory FolderLink.fromJson(Map<String, dynamic> j) => FolderLink(
+        id: j['id'] as String,
+        name: j['name'] as String? ?? '',
+        lastSync: j['sync'] == null ? null : DateTime.parse(j['sync'] as String),
       );
 }
 

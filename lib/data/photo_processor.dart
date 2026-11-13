@@ -13,13 +13,22 @@ export 'similarity.dart' show PhotoFeatures;
 
 /// Result of preparing one picked image for the album.
 class ProcessedPhoto {
-  ProcessedPhoto(this.thumbJpeg, this.width, this.height, this.palette, this.takenAt, this.features);
+  ProcessedPhoto(this.thumbJpeg, this.width, this.height, this.palette, this.exif, this.features);
   final Uint8List thumbJpeg;
   final int width;
   final int height;
   final List<PaletteColor> palette;
-  final DateTime? takenAt;
+  final ExifInfo exif;
   final PhotoFeatures features;
+
+  DateTime? get takenAt => exif.takenAt;
+}
+
+class ExifInfo {
+  const ExifInfo({this.takenAt, this.lat, this.lng});
+  final DateTime? takenAt;
+  final double? lat;
+  final double? lng;
 }
 
 /// Longest edge of stored thumbnails used in the collages.
@@ -29,7 +38,7 @@ const thumbMaxEdge = 1280;
 /// EXIF rotation), creates a JPEG thumbnail, extracts its colour palette and
 /// reads the capture date.
 Future<ProcessedPhoto> processPhoto(Uint8List bytes) async {
-  final takenAt = await _readExifDate(bytes);
+  final exif = await _readExif(bytes);
 
   final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
   final codec = await ui.instantiateImageCodecWithSize(buffer, getTargetSize: (w, h) {
@@ -47,7 +56,7 @@ Future<ProcessedPhoto> processPhoto(Uint8List bytes) async {
   // JPEG encoding and colour analysis are CPU heavy: run them off the UI
   // isolate on Android (on the web `compute` runs inline).
   final result = await compute(_encodeAndAnalyse, (data.buffer.asUint8List(), w, h));
-  return ProcessedPhoto(result.$1, w, h, result.$2, takenAt, result.$3);
+  return ProcessedPhoto(result.$1, w, h, result.$2, exif, result.$3);
 }
 
 /// Computes similarity features from an already stored thumbnail (for photos
@@ -81,17 +90,39 @@ Future<PhotoFeatures> featuresFromThumb(Uint8List jpeg) async {
   return (img.encodeJpg(image, quality: 86), palette, features);
 }
 
-Future<DateTime?> _readExifDate(Uint8List bytes) async {
+Future<ExifInfo> _readExif(Uint8List bytes) async {
   try {
     final tags = await readExifFromBytes(bytes);
+    DateTime? takenAt;
     for (final name in const ['EXIF DateTimeOriginal', 'EXIF DateTimeDigitized', 'Image DateTime']) {
-      final parsed = parseExifDate(tags[name]?.printable);
-      if (parsed != null) return parsed;
+      takenAt = parseExifDate(tags[name]?.printable);
+      if (takenAt != null) break;
     }
+    double? coord(String key) {
+      final values = tags['GPS GPS$key']?.values.toList();
+      if (values == null || values.length < 3 || values.first is! Ratio) return null;
+      final ratios = values.cast<Ratio>();
+      return gpsToDecimal(
+        [for (final r in ratios) r.denominator == 0 ? 0.0 : r.numerator / r.denominator],
+        tags['GPS GPS${key}Ref']?.printable ?? '',
+      );
+    }
+
+    final lat = coord('Latitude'), lng = coord('Longitude');
+    // 0,0 is what some cameras write when they had no fix.
+    final valid = lat != null && lng != null && !(lat == 0 && lng == 0) && lat.abs() <= 90 && lng.abs() <= 180;
+    return ExifInfo(takenAt: takenAt, lat: valid ? lat : null, lng: valid ? lng : null);
   } catch (_) {
     // Not every format carries EXIF; fall back to file dates.
+    return const ExifInfo();
   }
-  return null;
+}
+
+/// Converts EXIF degrees/minutes/seconds plus N/S/E/W reference to decimal degrees.
+double gpsToDecimal(List<double> dms, String ref) {
+  final v = dms[0] + dms[1] / 60 + dms[2] / 3600;
+  final r = ref.trim().toUpperCase();
+  return (r == 'S' || r == 'W') ? -v : v;
 }
 
 /// Parses EXIF's "YYYY:MM:DD HH:MM:SS" format.

@@ -1,9 +1,12 @@
 import 'dart:math' as math;
 
 import 'package:intl/intl.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../models/grouping.dart';
 import '../models/models.dart';
+import 'event_screen.dart' show openAlbumMap;
 import '../theme/event_theme.dart';
 import '../widgets/common.dart';
 import 'photo_actions.dart';
@@ -65,6 +68,12 @@ class _PhotoViewerState extends State<PhotoViewer> {
                 foregroundColor: Colors.white,
                 title: Text('${_index + 1} / ${e.photos.length}'),
                 actions: [
+                  if (photo.hasLocation)
+                    IconButton(
+                      tooltip: 'Show on map',
+                      icon: const Icon(Icons.map_outlined),
+                      onPressed: () => openAlbumMap(context, e, focus: LatLng(photo.lat!, photo.lng!)),
+                    ),
                   IconButton(
                     tooltip: 'Photo options',
                     icon: const Icon(Icons.more_vert),
@@ -118,7 +127,10 @@ class _PhotoViewerState extends State<PhotoViewer> {
                               Text(photo.caption, style: const TextStyle(color: Colors.white, fontSize: 17, height: 1.35)),
                             const SizedBox(height: 4),
                             Text(
-                              DateFormat('EEEE, d MMMM y Â· HH:mm').format(photo.takenAt),
+                              [
+                                DateFormat('EEEE, d MMMM y · HH:mm').format(photo.takenAt),
+                                ?(e.momentOf(photo.id)?.place?.name ?? e.dayPlaces[dayKey(photo.takenAt)]),
+                              ].join('  ·  '),
                               style: const TextStyle(color: Colors.white70, fontSize: 13),
                             ),
                           ],
@@ -196,7 +208,14 @@ class _ZoomablePhotoState extends State<_ZoomablePhoto> {
                   PhotoThumb(photo: p, radius: 0, fit: BoxFit.contain),
                   Image(
                     image: ResizeImage(
-                      StoredImage(repo, p.fullKey),
+                      // Referenced photos load from the device gallery, copied ones from storage.
+                      p.assetId != null && repo.gallery != null
+                          ? GalleryImage(
+                              repo.gallery!,
+                              p.assetId!,
+                              (widget.fullWidth * math.min(p.width, p.height) / math.max(p.width, p.height)).round(),
+                            )
+                          : StoredImage(repo, p.fullKey),
                       width: widget.fullWidth,
                       height: widget.fullWidth,
                       policy: ResizeImagePolicy.fit,
@@ -207,7 +226,27 @@ class _ZoomablePhotoState extends State<_ZoomablePhoto> {
                       duration: const Duration(milliseconds: 250),
                       child: child,
                     ),
-                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                    errorBuilder: (_, _, _) => p.assetId == null
+                        ? const SizedBox.shrink()
+                        : const Align(
+                            alignment: Alignment.bottomCenter,
+                            child: Padding(
+                              padding: EdgeInsets.all(8),
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: Colors.black54,
+                                  borderRadius: BorderRadius.all(Radius.circular(12)),
+                                ),
+                                child: Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  child: Text(
+                                    'Original no longer on this device',
+                                    style: TextStyle(color: Colors.white, fontSize: 12),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                   ),
                 ],
               ),

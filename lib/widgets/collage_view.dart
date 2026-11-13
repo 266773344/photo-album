@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:math' as math;
+import 'dart:ui' as ui;
+
 import 'package:material_ui/material_ui.dart';
 
 import '../layout/collage_layout.dart';
@@ -12,6 +16,7 @@ class CollageInteraction {
     required this.onOpen,
     required this.onToggle,
     required this.onStartSelection,
+    this.flat = false,
   });
 
   /// Selected photo ids; non-empty means selection mode is active.
@@ -21,6 +26,9 @@ class CollageInteraction {
   final ValueChanged<Photo> onOpen;
   final ValueChanged<AlbumItem> onToggle;
   final ValueChanged<AlbumItem> onStartSelection;
+
+  /// No drop shadows on cells (airy layout).
+  final bool flat;
 
   bool get selecting => selected.isNotEmpty;
   bool isSelected(AlbumItem item) => item.ids.every(selected.contains);
@@ -53,7 +61,12 @@ class CollageBlockView extends StatelessWidget {
           for (final cell in block.cells)
             Positioned.fromRect(
               rect: cell.rect.deflate(gap / 2),
-              child: _Cell(item: items[cell.index], interaction: interaction),
+              child: _Cell(
+                // Keyed by content so a cell's carousel state survives rebuilds.
+                key: ValueKey(items[cell.index].stack?.id ?? items[cell.index].photos.first.id),
+                item: items[cell.index],
+                interaction: interaction,
+              ),
             ),
         ],
       ),
@@ -61,8 +74,11 @@ class CollageBlockView extends StatelessWidget {
   }
 }
 
+/// How long a carousel shows each photo before turning to the next.
+const carouselInterval = Duration(milliseconds: 4200);
+
 class _Cell extends StatefulWidget {
-  const _Cell({required this.item, required this.interaction});
+  const _Cell({super.key, required this.item, required this.interaction});
   final AlbumItem item;
   final CollageInteraction interaction;
 
@@ -71,8 +87,14 @@ class _Cell extends StatefulWidget {
 }
 
 class _CellState extends State<_Cell> {
+  // Carousels page "infinitely": page index modulo the photo count, so
+  // auto-advance always moves forward without a jarring rewind.
+  static const _loopBase = 10000;
   PageController? _pages;
   int _page = 0;
+  Timer? _timer;
+  Timer? _start;
+  DateTime _lastTouch = DateTime.fromMillisecondsSinceEpoch(0);
 
   List<Photo> get _ordered {
     // Carousel starts with its cover, then the rest in time order.
@@ -83,6 +105,29 @@ class _CellState extends State<_Cell> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.item.isStack) {
+      _pages = PageController(initialPage: _loopBase * widget.item.photos.length);
+      // Stagger carousels so they don't all turn at the same moment.
+      final offset = (widget.item.stack!.id.hashCode & 0x7fffffff) % carouselInterval.inMilliseconds;
+      _start = Timer(Duration(milliseconds: offset), () {
+        _timer = Timer.periodic(carouselInterval, (_) => _advance());
+      });
+    }
+  }
+
+  void _advance() {
+    final pages = _pages;
+    if (!mounted || pages == null || !pages.hasClients) return;
+    if (widget.interaction.selecting) return;
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) return;
+    if (!TickerMode.valuesOf(context).enabled) return; // e.g. covered by another route
+    if (DateTime.now().difference(_lastTouch) < const Duration(seconds: 8)) return;
+    pages.nextPage(duration: const Duration(milliseconds: 650), curve: Curves.easeInOutCubic);
+  }
+
+  @override
   void didUpdateWidget(covariant _Cell old) {
     super.didUpdateWidget(old);
     if (_page >= widget.item.photos.length) _page = 0;
@@ -90,6 +135,8 @@ class _CellState extends State<_Cell> {
 
   @override
   void dispose() {
+    _start?.cancel();
+    _timer?.cancel();
     _pages?.dispose();
     super.dispose();
   }
@@ -105,20 +152,19 @@ class _CellState extends State<_Cell> {
 
     Widget content;
     if (item.isStack) {
-      _pages ??= PageController();
       content = Stack(
         fit: StackFit.expand,
         children: [
-          PageView.builder(
-            controller: _pages,
-            itemCount: photos.length,
-            onPageChanged: (i) => setState(() => _page = i),
-            itemBuilder: (_, i) => PhotoThumb(photo: photos[i], heroTag: 'photo_${photos[i].id}'),
-          ),
-          Positioned(
-            top: 8,
-            right: 8,
-            child: IgnorePointer(child: _Badge(count: photos.length)),
+          NotificationListener<ScrollStartNotification>(
+            onNotification: (n) {
+              if (n.dragDetails != null) _lastTouch = DateTime.now();
+              return false;
+            },
+            child: PageView.builder(
+              controller: _pages,
+              onPageChanged: (i) => setState(() => _page = i % photos.length),
+              itemBuilder: (_, i) => _CarouselPage(photo: photos[i % photos.length], cellAspect: item.aspect),
+            ),
           ),
           Positioned(
             left: 0,
@@ -132,66 +178,98 @@ class _CellState extends State<_Cell> {
       content = PhotoThumb(photo: current, heroTag: 'photo_${current.id}');
     }
 
-    return AnimatedScale(
-      scale: selected ? 0.9 : 1,
-      duration: const Duration(milliseconds: 160),
-      curve: Curves.easeOut,
-      child: Material(
-        color: Colors.transparent,
-        elevation: selected ? 0 : 1.5,
-        shadowColor: Colors.black38,
-        borderRadius: BorderRadius.circular(8),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            content,
-            if (current.caption.isNotEmpty) _Caption(text: current.caption),
-            // Gesture layer. For carousels it must let horizontal drags reach
-            // the PageView, so it only listens for taps and long presses.
-            GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: () => ia.selecting ? ia.onToggle(item) : ia.onOpen(current),
-              onLongPress: () => ia.selecting ? ia.onToggle(item) : ia.onStartSelection(item),
-            ),
-            if (ia.selecting)
-              IgnorePointer(
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
-                    color: selected ? scheme.primary.withValues(alpha: 0.18) : Colors.transparent,
-                    border: Border.all(color: selected ? scheme.primary : Colors.transparent, width: 3),
-                  ),
-                  alignment: Alignment.topLeft,
-                  padding: const EdgeInsets.all(6),
-                  child: Icon(
-                    selected ? Icons.check_circle : Icons.radio_button_unchecked,
-                    color: selected ? scheme.primary : Colors.white,
-                    shadows: const [Shadow(blurRadius: 4, color: Colors.black54)],
+    return LayoutBuilder(builder: (context, size) {
+      // Captions only where there's room for them; the viewer always shows them.
+      final showCaption = current.caption.isNotEmpty && size.maxHeight >= 130 && size.maxWidth >= 130;
+      return AnimatedScale(
+        scale: selected ? 0.9 : 1,
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        child: Material(
+          color: Colors.transparent,
+          elevation: selected || ia.flat ? 0 : 1.5,
+          shadowColor: Colors.black38,
+          borderRadius: BorderRadius.circular(8),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              content,
+              if (showCaption) _Caption(text: current.caption),
+              // Gesture layer. For carousels it must let horizontal drags reach
+              // the PageView, so it only listens for taps and long presses.
+              GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () => ia.selecting ? ia.onToggle(item) : ia.onOpen(current),
+                onLongPress: () => ia.selecting ? ia.onToggle(item) : ia.onStartSelection(item),
+              ),
+              if (ia.selecting)
+                IgnorePointer(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      color: selected ? scheme.primary.withValues(alpha: 0.18) : Colors.transparent,
+                      border: Border.all(color: selected ? scheme.primary : Colors.transparent, width: 3),
+                    ),
+                    alignment: Alignment.topLeft,
+                    padding: const EdgeInsets.all(6),
+                    child: Icon(
+                      selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                      color: selected ? scheme.primary : Colors.white,
+                      shadows: const [Shadow(blurRadius: 4, color: Colors.black54)],
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
-      ),
-    );
+      );
+    });
   }
 }
 
-class _Badge extends StatelessWidget {
-  const _Badge({required this.count});
-  final int count;
+/// One photo inside a carousel cell. The cell has the cover photo's shape;
+/// photos with a noticeably different shape are shown whole ("contain") on a
+/// soft, blurred copy of themselves instead of being cropped.
+class _CarouselPage extends StatelessWidget {
+  const _CarouselPage({required this.photo, required this.cellAspect});
+  final Photo photo;
+  final double cellAspect;
 
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-        decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.burst_mode_outlined, size: 14, color: Colors.white),
-          const SizedBox(width: 4),
-          Text('$count', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
-        ]),
-      );
+  Widget build(BuildContext context) {
+    final fits = (math.log(photo.aspect / cellAspect)).abs() < 0.06;
+    final thumb = PhotoThumb(
+      photo: photo,
+      heroTag: 'photo_${photo.id}',
+      fit: fits ? BoxFit.cover : BoxFit.contain,
+      transparent: !fits,
+    );
+    if (fits) return thumb;
+    final repo = AlbumScope.read(context);
+    final base = photo.palette.isEmpty ? Colors.grey : Color(photo.palette.first.argb);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ColoredBox(color: base),
+          // A tiny decode, scaled up and blurred: cheap and soft.
+          ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10, tileMode: TileMode.clamp),
+            child: Image(
+              image: ResizeImage(StoredImage(repo, photo.thumbKey), width: 32, policy: ResizeImagePolicy.fit),
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.medium,
+              errorBuilder: (_, _, _) => const SizedBox.shrink(),
+            ),
+          ),
+          const ColoredBox(color: Color(0x22000000)),
+          thumb,
+        ],
+      ),
+    );
+  }
 }
 
 class _Dots extends StatelessWidget {
@@ -209,10 +287,10 @@ class _Dots extends StatelessWidget {
       children: [
         for (var i = start; i < start + shown; i++)
           AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
+            duration: const Duration(milliseconds: 250),
             margin: const EdgeInsets.symmetric(horizontal: 2.5),
-            width: i == index ? 16 : 6,
-            height: 6,
+            width: i == index ? 14 : 5,
+            height: 5,
             decoration: BoxDecoration(
               color: i == index ? Colors.white : Colors.white60,
               borderRadius: BorderRadius.circular(3),

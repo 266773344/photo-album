@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../data/album_repository.dart';
 import '../models/models.dart';
+import '../services/gallery.dart';
 
 /// Makes the [AlbumRepository] available to the widget tree and rebuilds
 /// dependents when it changes.
@@ -48,20 +49,63 @@ class StoredImage extends ImageProvider<StoredImage> {
   int get hashCode => blobKey.hashCode;
 }
 
+/// Image provider that loads a photo straight from the device gallery, scaled
+/// by the system so its shorter side is at least [edge] pixels.
+@immutable
+class GalleryImage extends ImageProvider<GalleryImage> {
+  const GalleryImage(this.gallery, this.assetId, this.edge);
+  final Gallery gallery;
+  final String assetId;
+  final int edge;
+
+  @override
+  Future<GalleryImage> obtainKey(ImageConfiguration configuration) => SynchronousFuture(this);
+
+  @override
+  ImageStreamCompleter loadImage(GalleryImage key, ImageDecoderCallback decode) =>
+      MultiFrameImageStreamCompleter(codec: _load(decode), scale: 1.0, debugLabel: 'gallery $assetId');
+
+  Future<ui.Codec> _load(ImageDecoderCallback decode) async {
+    final bytes = await gallery.image(assetId, edge, quality: 92);
+    if (bytes == null) throw StateError('Photo $assetId is no longer on this device');
+    return decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+  }
+
+  @override
+  bool operator ==(Object other) => other is GalleryImage && other.assetId == assetId && other.edge == edge;
+
+  @override
+  int get hashCode => Object.hash(assetId, edge);
+}
+
 /// A photo thumbnail that fills its box, with the photo's dominant colour as
 /// placeholder while loading and a soft fade-in.
 class PhotoThumb extends StatelessWidget {
-  const PhotoThumb({super.key, required this.photo, this.radius = 8, this.fit = BoxFit.cover, this.heroTag});
+  const PhotoThumb({
+    super.key,
+    required this.photo,
+    this.radius = 8,
+    this.fit = BoxFit.cover,
+    this.heroTag,
+    this.transparent = false,
+  });
 
   final Photo photo;
   final double radius;
   final BoxFit fit;
   final Object? heroTag;
 
+  /// No coloured placeholder behind the image (for letterboxed photos).
+  final bool transparent;
+
   @override
   Widget build(BuildContext context) {
     final repo = AlbumScope.read(context);
-    final placeholder = photo.palette.isEmpty ? Colors.grey.shade400 : Color(photo.palette.first.argb);
+    final placeholder = transparent
+        ? Colors.transparent
+        : photo.palette.isEmpty
+            ? Colors.grey.shade400
+            : Color(photo.palette.first.argb);
     Widget child = ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: ColoredBox(

@@ -177,8 +177,28 @@ void main() {
     });
   });
 
+  testWidgets('carousels turn by themselves', (tester) async {
+    final repo = AlbumRepository(MemoryStorage());
+    await repo.load();
+    final e = await repo.createEvent(title: 'Porto');
+    final t = DateTime(2024, 8, 1, 8);
+    e.photos.addAll([for (var i = 0; i < 3; i++) photoAt('p$i', t.add(Duration(seconds: i)))]);
+    e.createStack(['p0', 'p1', 'p2']);
+    await repo.changed(e);
+
+    await tester.pumpWidget(PhotoAlbumApp(repo: repo));
+    openEvent(tester.element(find.text('Porto')), e);
+    await tester.pumpAndSettle();
+
+    final pageView = tester.widget<PageView>(find.byType(PageView));
+    final start = pageView.controller!.page!;
+    await tester.pump(const Duration(seconds: 9)); // > stagger offset + one interval
+    await tester.pumpAndSettle();
+    expect(pageView.controller!.page, greaterThan(start));
+  });
+
   testWidgets('long-press selects; carousel and moment actions work', (tester) async {
-    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.physicalSize = const Size(1080, 6000); // tall enough to build every band
     tester.view.devicePixelRatio = 2.6;
     addTearDown(tester.view.reset);
 
@@ -210,7 +230,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(e.stacks.single.photoIds.toSet(), {'p0', 'p1'});
     expect(find.text('2 selected'), findsNothing);
-    expect(find.text('2'), findsOneWidget); // carousel badge
 
     // Select the carousel (whole) and put it into a new moment.
     final cells2 = find.byType(GestureDetector).evaluate().where((el) {

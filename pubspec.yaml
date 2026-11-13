@@ -41,6 +41,10 @@ dependencies:
   path_provider: ^2.1.6
   idb_shim: ^2.11.3
   intl: ^0.20.3
+  flutter_map: ^8.3.2
+  latlong2: ^0.10.1
+  http: ^1.6.0
+  photo_manager: 3.12.0
 
 dev_dependencies:
   flutter_test:

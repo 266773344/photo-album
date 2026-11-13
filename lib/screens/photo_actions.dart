@@ -3,6 +3,8 @@ import 'package:material_ui/material_ui.dart';
 import '../models/grouping.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
+import 'moment_sheet.dart' show photosCenter;
+import 'place_picker.dart';
 
 /// Per-photo actions (used by the fullscreen viewer).
 /// Returns true if the photo was deleted.
@@ -25,6 +27,11 @@ Future<bool> showPhotoActions(BuildContext context, AlbumEvent e, Photo p) async
             title: const Text('Use as album cover'),
             enabled: e.cover?.id != p.id,
             onTap: () => Navigator.pop(context, 'cover'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.add_location_alt_outlined),
+            title: Text(p.hasLocation ? 'Change location' : 'Set location'),
+            onTap: () => Navigator.pop(context, 'location'),
           ),
           if (stack != null) ...[
             ListTile(
@@ -56,6 +63,16 @@ Future<bool> showPhotoActions(BuildContext context, AlbumEvent e, Photo p) async
       p.caption = text;
     case 'cover':
       e.coverPhotoId = p.id;
+    case 'location':
+      final place = await pickPlace(
+        context,
+        title: 'Where was this photo taken?',
+        initial: p.hasLocation ? GeoPlace(name: 'Current location', lat: p.lat!, lng: p.lng!) : null,
+        near: photosCenter(e.photos),
+      );
+      if (place == null) return false;
+      await repo.setPhotoLocation(e, [p.id], place);
+      return false;
     case 'stackcover':
       stack!.coverId = p.id;
     case 'unstack':

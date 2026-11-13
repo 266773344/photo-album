@@ -118,11 +118,14 @@ final Map<int, Map<String, _Template>> _templates = {
 
 /// Lays out [aspects] (width / height of each photo, in order) into blocks
 /// for a container of [width] logical pixels.
-List<CollageBlock> buildCollage(List<double> aspects, double width, {int seed = 0}) {
+///
+/// With [airy] the engine prefers fewer, larger photos per band (more singles
+/// and pairs, taller bands) for a calmer page.
+List<CollageBlock> buildCollage(List<double> aspects, double width, {int seed = 0, bool airy = false}) {
   final rnd = math.Random(seed);
   // Ideal block height: roughly 70% of the width on phones, capped on large
   // screens so blocks don't become huge.
-  final idealHeight = (width * 0.72).clamp(220.0, 560.0);
+  final idealHeight = (width * (airy ? 0.8 : 0.72)).clamp(220.0, airy ? 620.0 : 560.0);
   final idealAspect = width / idealHeight;
   final minCell = math.min(110.0, width * 0.24);
 
@@ -133,12 +136,14 @@ List<CollageBlock> buildCollage(List<double> aspects, double width, {int seed = 
     final remaining = aspects.length - i;
     // Seeded preference for how many photos this block should hold.
     final roll = rnd.nextDouble();
-    final desired = roll < 0.14 ? 1 : roll < 0.42 ? 2 : roll < 0.78 ? 3 : roll < 0.95 ? 4 : 5;
+    final desired = airy
+        ? (roll < 0.24 ? 1 : roll < 0.66 ? 2 : roll < 0.94 ? 3 : 4)
+        : (roll < 0.14 ? 1 : roll < 0.42 ? 2 : roll < 0.78 ? 3 : roll < 0.95 ? 4 : 5);
 
     _Candidate? best;
     for (final entry in _templates.entries) {
       final n = entry.key;
-      if (n > remaining) continue;
+      if (n > remaining || (airy && n == 5)) continue;
       final leaves = [for (var k = 0; k < n; k++) Leaf(i + k, aspects[i + k].clamp(0.3, 4.0))];
       for (final t in entry.value.entries) {
         final node = t.value(leaves);

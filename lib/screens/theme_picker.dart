@@ -118,6 +118,20 @@ class _ThemePicker extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 24),
+              Text('Layout', style: text.titleSmall),
+              const SizedBox(height: 8),
+              SegmentedButton<LayoutStyle>(
+                segments: const [
+                  ButtonSegment(value: LayoutStyle.airy, label: Text('Airy'), icon: Icon(Icons.view_agenda_outlined)),
+                  ButtonSegment(value: LayoutStyle.compact, label: Text('Compact'), icon: Icon(Icons.dashboard_outlined)),
+                ],
+                selected: {event.layout},
+                onSelectionChanged: (v) {
+                  event.layout = v.first;
+                  AlbumScope.read(context).changed(event);
+                },
+              ),
+              const SizedBox(height: 24),
               Text('Appearance', style: text.titleSmall),
               const SizedBox(height: 8),
               SegmentedButton<bool?>(

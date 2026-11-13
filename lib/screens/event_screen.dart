@@ -3,18 +3,46 @@ import 'dart:math' as math;
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../layout/collage_layout.dart';
 import '../models/grouping.dart';
 import '../models/models.dart';
+import '../services/place_story.dart';
 import '../theme/event_theme.dart';
+import '../widgets/album_map.dart';
 import '../widgets/collage_view.dart';
 import '../widgets/common.dart';
 import 'event_editor.dart';
+import 'gallery_picker.dart';
 import 'moment_sheet.dart';
 import 'photo_viewer.dart';
+import 'place_picker.dart';
 import 'theme_picker.dart';
+
+/// Opens the album's map, optionally centred on [focus].
+void openAlbumMap(BuildContext context, AlbumEvent e, {LatLng? focus}) {
+  Navigator.of(context).push(MaterialPageRoute<void>(
+    builder: (_) => Theme(
+      data: EventStyle.of(e).themeData,
+      child: AlbumMapScreen(
+        eventId: e.id,
+        focus: focus,
+        onOpenPhoto: (ctx, p) => openPhotoViewer(ctx, e, p),
+      ),
+    ),
+  ));
+}
+
+void openPhotoViewer(BuildContext context, AlbumEvent e, Photo p) {
+  Navigator.of(context).push(PageRouteBuilder<void>(
+    opaque: false,
+    transitionDuration: const Duration(milliseconds: 300),
+    pageBuilder: (_, _, _) => PhotoViewer(eventId: e.id, initialPhotoId: p.id),
+    transitionsBuilder: (_, anim, _, child) => FadeTransition(opacity: anim, child: child),
+  ));
+}
 
 void openEvent(BuildContext context, AlbumEvent e, {bool pickPhotos = false}) {
   Navigator.of(context).push(MaterialPageRoute<void>(
@@ -44,9 +72,14 @@ class _EventScreenState extends State<EventScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.pickPhotosOnOpen) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _addPhotos());
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.pickPhotosOnOpen) {
+        _addPhotos();
+      } else {
+        _syncFolders();
+      }
+    });
   }
 
   AlbumEvent? get _event => AlbumScope.read(context).byId(widget.eventId);
@@ -85,16 +118,101 @@ class _EventScreenState extends State<EventScreen> {
   }
 
   Future<void> _addToMoment(AlbumEvent e) async {
-    final choice = await showMomentSheet(context, event: e, photoCount: _selected.length);
+    final choice = await showMomentSheet(context, event: e, photos: _selectedPhotos(e));
     if (choice == null || !mounted) return;
+    final repo = AlbumScope.read(context);
+    Moment? created;
     switch (choice) {
       case NewMoment(:final title, :final note):
-        e.createMoment(title, note, _selected);
+        created = e.createMoment(title, note, _selected);
       case ExistingMoment(:final moment):
         e.addToMoment(moment, _selected);
     }
     _clearSelection();
     await _persist(e);
+    if (created != null && choice is NewMoment && choice.place != null) {
+      await _guardStory(() => repo.setMomentPlace(e, created!, choice.place));
+    }
+  }
+
+  /// Runs a place-description action and reports failures as a snackbar.
+  Future<void> _guardStory(Future<void> Function() action) async {
+    try {
+      await action();
+    } on StoryException catch (err) {
+      if (mounted) _snack(err.message);
+    }
+  }
+
+  Future<void> _setLocationForSelected(AlbumEvent e) async {
+    final photos = _selectedPhotos(e);
+    final initial = photos.where((p) => p.hasLocation).firstOrNull;
+    final place = await pickPlace(
+      context,
+      title: 'Where were ${photos.length == 1 ? 'this photo' : 'these photos'} taken?',
+      initial: initial == null ? null : GeoPlace(name: 'Current location', lat: initial.lat!, lng: initial.lng!),
+      near: photosCenter(e.photos),
+    );
+    if (place == null || !mounted) return;
+    _clearSelection();
+    await AlbumScope.read(context).setPhotoLocation(e, photos.map((p) => p.id), place);
+  }
+
+  Future<void> _momentActions(AlbumEvent e, Moment m) async {
+    final repo = AlbumScope.read(context);
+    final canWrite = repo.settings.canWriteStories;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('Edit title, note & place'),
+            onTap: () => Navigator.pop(context, 'edit'),
+          ),
+          if (m.place != null)
+            ListTile(
+              leading: const Icon(Icons.auto_awesome_outlined),
+              title: Text(m.story == null ? 'Write “About this place”' : 'Rewrite “About this place”'),
+              subtitle: canWrite ? null : const Text('Needs an Anthropic API key (Settings)'),
+              enabled: canWrite,
+              onTap: () => Navigator.pop(context, 'story'),
+            ),
+          if (m.story != null)
+            ListTile(
+              leading: const Icon(Icons.notes),
+              title: const Text('Remove place description'),
+              onTap: () => Navigator.pop(context, 'nostory'),
+            ),
+          if (m.place != null)
+            ListTile(
+              leading: const Icon(Icons.map_outlined),
+              title: const Text('Show on map'),
+              onTap: () => Navigator.pop(context, 'map'),
+            ),
+          ListTile(
+            leading: const Icon(Icons.bookmark_remove_outlined),
+            title: const Text('Dissolve moment (keep photos)'),
+            onTap: () => Navigator.pop(context, 'dissolve'),
+          ),
+        ]),
+      ),
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'edit':
+        await _editMoment(e, m);
+      case 'story':
+        await _guardStory(() => repo.writeStory(e, m));
+      case 'nostory':
+        m.story = null;
+        await _persist(e);
+      case 'map':
+        openAlbumMap(context, e, focus: LatLng(m.place!.lat, m.place!.lng));
+      case 'dissolve':
+        await _dissolveMoment(e, m);
+    }
   }
 
   Future<void> _removeSelected(AlbumEvent e) async {
@@ -117,6 +235,8 @@ class _EventScreenState extends State<EventScreen> {
         e.ungroup(_selected);
       case 'unmoment':
         e.removeFromMoment(_selected);
+      case 'location':
+        return _setLocationForSelected(e);
       case 'cover':
         e.coverPhotoId = _selectedPhotos(e).first.id;
       case 'caption':
@@ -136,17 +256,105 @@ class _EventScreenState extends State<EventScreen> {
   Future<void> _addPhotos() async {
     final e = _event;
     if (e == null) return;
-    final files = await ImagePicker().pickMultiImage(requestFullMetadata: true);
-    if (files.isEmpty || !mounted) return;
     final repo = AlbumScope.read(context);
+    final gallery = repo.gallery;
     final stacksBefore = e.stacks.length;
-    final failed = await repo.importPhotos(e, files);
+    int count, failed;
+    if (gallery != null) {
+      // Android: reference photos in the device gallery instead of copying them.
+      final pick = await pickFromGallery(context, e, gallery);
+      if (pick == null || !mounted) return;
+      switch (pick) {
+        case PickedPhotos(:final assets):
+          count = assets.length;
+          failed = await repo.importAssets(e, assets);
+        case PickedFolder(:final folder):
+          final result = await repo.linkFolder(e, folder);
+          if (!mounted) return;
+          _snack(result == null || result.isEmpty
+              ? 'Linked “${folder.name}”'
+              : 'Linked “${folder.name}” · $result');
+          return;
+      }
+    } else {
+      final files = await ImagePicker().pickMultiImage(requestFullMetadata: true);
+      if (files.isEmpty || !mounted) return;
+      count = files.length;
+      failed = await repo.importPhotos(e, files);
+    }
     if (!mounted) return;
     final newStacks = e.stacks.length - stacksBefore;
     _snack([
-      failed == 0 ? 'Added ${files.length} photo${files.length == 1 ? '' : 's'}' : 'Added ${files.length - failed}, $failed could not be read',
+      failed == 0 ? 'Added $count photo${count == 1 ? '' : 's'}' : 'Added ${count - failed}, $failed could not be read',
       if (newStacks > 0) 'grouped similar shots into $newStacks carousel${newStacks == 1 ? '' : 's'}',
     ].join(' · '));
+  }
+
+  /// Brings the album up to date with its linked gallery folders.
+  Future<void> _syncFolders({bool force = false}) async {
+    final e = _event;
+    if (e == null || e.linkedFolders.isEmpty) return;
+    final result = await AlbumScope.read(context).syncFolders(e, force: force);
+    if (!mounted || result == null) return;
+    if (!result.isEmpty) {
+      _snack('Synced ${e.linkedFolders.map((l) => '“${l.name}”').join(', ')}: $result');
+    } else if (force) {
+      _snack('Up to date');
+    }
+  }
+
+  Future<void> _manageFolders(AlbumEvent e) async {
+    final repo = AlbumScope.read(context);
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheet) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+                child: Text('Linked folders', style: Theme.of(context).textTheme.titleLarge),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+                child: Text(
+                  'New photos in these folders are added when you open the album; '
+                  'photos deleted from them are removed. Unlinking keeps the photos.',
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+              ),
+              for (final l in e.linkedFolders)
+                ListTile(
+                  leading: const Icon(Icons.folder_special_outlined),
+                  title: Text(l.name),
+                  subtitle: Text('${e.photos.where((p) => p.folderId == l.id).length} photos in this album'),
+                  trailing: TextButton(
+                    onPressed: () async {
+                      await repo.unlinkFolder(e, l.id);
+                      setSheet(() {});
+                      if (e.linkedFolders.isEmpty && context.mounted) Navigator.pop(context);
+                    },
+                    child: const Text('Unlink'),
+                  ),
+                ),
+              if (e.linkedFolders.isNotEmpty)
+                ListTile(
+                  leading: const Icon(Icons.sync),
+                  title: const Text('Sync now'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _syncFolders(force: true);
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _editDetails(AlbumEvent e) async {
@@ -181,7 +389,9 @@ class _EventScreenState extends State<EventScreen> {
     m
       ..title = choice.title
       ..note = choice.note;
+    final repo = AlbumScope.read(context);
     await _persist(e);
+    await _guardStory(() => repo.setMomentPlace(e, m, choice.place));
   }
 
   Future<void> _dissolveMoment(AlbumEvent e, Moment m) async {
@@ -202,14 +412,7 @@ class _EventScreenState extends State<EventScreen> {
     await AlbumScope.read(context).deleteEvent(e);
   }
 
-  void _openViewer(AlbumEvent e, Photo p) {
-    Navigator.of(context).push(PageRouteBuilder<void>(
-      opaque: false,
-      transitionDuration: const Duration(milliseconds: 300),
-      pageBuilder: (_, _, _) => PhotoViewer(eventId: e.id, initialPhotoId: p.id),
-      transitionsBuilder: (_, anim, _, child) => FadeTransition(opacity: anim, child: child),
-    ));
-  }
+  void _openViewer(AlbumEvent e, Photo p) => openPhotoViewer(context, e, p);
 
   // ---- build --------------------------------------------------------------
 
@@ -224,12 +427,15 @@ class _EventScreenState extends State<EventScreen> {
     final days = buildAlbumStructure(e);
     final progress = repo.importProgress[e.id];
     final firstDay = days.isEmpty ? null : days.first.date;
+    final airy = e.layout == LayoutStyle.airy;
     final interaction = CollageInteraction(
       selected: _selected,
       onOpen: (p) => _openViewer(e, p),
       onToggle: _toggle,
       onStartSelection: _startSelection,
+      flat: airy,
     );
+    final geo = AlbumGeo(e);
 
     // Background colours flow from one day's tint into the next.
     final tints = [for (final d in days) style.dayTints[d.key] ?? s.surface];
@@ -255,7 +461,11 @@ class _EventScreenState extends State<EventScreen> {
                       colors: [s.surface, tints.firstOrNull ?? s.surface],
                     ),
                   ),
-                  sliver: SliverToBoxAdapter(child: _Constrained(child: _InfoSection(event: e, style: style))),
+                  sliver: SliverToBoxAdapter(
+                    child: _Constrained(
+                      child: _InfoSection(event: e, style: style, geo: geo, onOpenMap: () => openAlbumMap(context, e)),
+                    ),
+                  ),
                 ),
                 if (e.photos.isEmpty)
                   SliverFillRemaining(
@@ -278,9 +488,10 @@ class _EventScreenState extends State<EventScreen> {
                       day: days[i],
                       dayNumber: days[i].date.difference(firstDay!).inDays + 1,
                       interaction: interaction,
+                      airy: airy,
                       onEditNote: () => _editDayNote(e, days[i]),
-                      onEditMoment: (m) => _editMoment(e, m),
-                      onDissolveMoment: (m) => _dissolveMoment(e, m),
+                      onMomentActions: (m) => _momentActions(e, m),
+                      onWriteStory: (m) => _guardStory(() => AlbumScope.read(context).writeStory(e, m)),
                     ),
                   ),
                 if (e.photos.isNotEmpty)
@@ -349,6 +560,8 @@ class _EventScreenState extends State<EventScreen> {
             case 'shuffle':
               e.layoutSeed = math.Random().nextInt(1 << 30);
               await repo.changed(e);
+            case 'folders':
+              await _manageFolders(e);
             case 'delete':
               await _delete(e);
           }
@@ -363,6 +576,11 @@ class _EventScreenState extends State<EventScreen> {
             child: const Text('Group similar photos'),
           ),
           const PopupMenuItem(value: 'shuffle', child: ListTile(leading: Icon(Icons.shuffle), title: Text('Shuffle layout'))),
+          if (e.linkedFolders.isNotEmpty)
+            const PopupMenuItem(
+              value: 'folders',
+              child: ListTile(leading: Icon(Icons.folder_special_outlined), title: Text('Linked folders')),
+            ),
           const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline), title: Text('Delete album'))),
         ],
       ),
@@ -429,63 +647,42 @@ class _Constrained extends StatelessWidget {
 }
 
 class _InfoSection extends StatelessWidget {
-  const _InfoSection({required this.event, required this.style});
+  const _InfoSection({required this.event, required this.style, required this.geo, required this.onOpenMap});
   final AlbumEvent event;
   final EventStyle style;
+  final AlbumGeo geo;
+  final VoidCallback onOpenMap;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     final s = style.scheme;
-    final chips = <(IconData, String)>[
-      if (event.location.isNotEmpty) (Icons.place_outlined, event.location),
-      if (event.photos.isNotEmpty) (Icons.calendar_today_outlined, formatDateRange(event.start, event.end)),
-      if (event.photos.isNotEmpty) (Icons.photo_outlined, '${event.photos.length} photos'),
+    final facts = [
+      if (event.location.isNotEmpty) event.location,
+      if (event.photos.isNotEmpty) formatDateRange(event.start, event.end),
+      if (event.photos.isNotEmpty) '${event.photos.length} photos',
     ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (chips.isNotEmpty)
-            Wrap(
-              spacing: 16,
-              runSpacing: 6,
-              children: [
-                for (final (icon, label) in chips)
-                  Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(icon, size: 18, color: s.primary),
-                    const SizedBox(width: 6),
-                    Text(label, style: t.textTheme.bodyMedium?.copyWith(color: s.onSurfaceVariant)),
-                  ]),
-              ],
-            ),
+          if (facts.isNotEmpty)
+            Text(facts.join('  ·  '), style: t.textTheme.bodyMedium?.copyWith(color: s.onSurfaceVariant, letterSpacing: 0.2)),
           if (event.description.isNotEmpty) ...[
             const SizedBox(height: 14),
-            Text(event.description, style: t.textTheme.bodyLarge?.copyWith(height: 1.5, color: s.onSurface)),
+            Text(event.description, style: t.textTheme.bodyLarge?.copyWith(height: 1.55, color: s.onSurface)),
           ],
-          if (style.palette.isNotEmpty) ...[
+          if (!geo.isEmpty) ...[
             const SizedBox(height: 16),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: SizedBox(
-                height: 6,
-                child: Row(children: [for (final c in style.palette) Expanded(child: ColoredBox(color: c))]),
-              ),
-            ),
+            AlbumMapCard(geo: geo, onOpen: onOpenMap),
           ],
           if (event.photos.length >= 4 && event.moments.isEmpty) ...[
-            const SizedBox(height: 12),
-            Row(children: [
-              Icon(Icons.touch_app_outlined, size: 16, color: s.onSurfaceVariant),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'Tip: long-press photos to select them, then group them into a moment or a carousel.',
-                  style: t.textTheme.bodySmall?.copyWith(color: s.onSurfaceVariant),
-                ),
-              ),
-            ]),
+            const SizedBox(height: 14),
+            Text(
+              'Tip: long-press photos to group them into a moment or carousel. Tap a day\'s title to add a note.',
+              style: t.textTheme.bodySmall?.copyWith(color: s.onSurfaceVariant),
+            ),
           ],
         ],
       ),
@@ -500,9 +697,10 @@ class _DaySliver extends StatelessWidget {
     required this.day,
     required this.dayNumber,
     required this.interaction,
+    required this.airy,
     required this.onEditNote,
-    required this.onEditMoment,
-    required this.onDissolveMoment,
+    required this.onMomentActions,
+    required this.onWriteStory,
   });
 
   final AlbumEvent event;
@@ -510,27 +708,34 @@ class _DaySliver extends StatelessWidget {
   final DayView day;
   final int dayNumber;
   final CollageInteraction interaction;
+  final bool airy;
   final VoidCallback onEditNote;
-  final ValueChanged<Moment> onEditMoment;
-  final ValueChanged<Moment> onDissolveMoment;
+  final ValueChanged<Moment> onMomentActions;
+  final ValueChanged<Moment> onWriteStory;
 
   @override
   Widget build(BuildContext context) {
+    final gap = airy ? 10.0 : _gap;
+    // Extra breathing room between collage bands in the airy layout.
+    final bandSpacing = airy ? 8.0 : 0.0;
     return SliverLayoutBuilder(builder: (context, constraints) {
       final cross = constraints.crossAxisExtent;
       final outer = math.max(0.0, (cross - _maxContentWidth) / 2);
       // Collage cells are inset by half a gap, so let the collage overhang
       // the text column by that much to keep photo edges aligned with text.
-      final loosePad = outer + _sidePadding - _gap / 2;
+      final loosePad = outer + _sidePadding - gap / 2;
       final cardMargin = outer + _sidePadding - 4;
-      const cardInner = 8 - _gap / 2;
+      final cardInner = 10 - gap / 2;
       final daySeed = event.layoutSeed ^ _stableHash(day.key);
 
       SliverList collageRows(List<AlbumItem> items, double width, int seed) {
-        final blocks = buildCollage([for (final i in items) i.aspect], width, seed: seed);
+        final blocks = buildCollage([for (final i in items) i.aspect], width, seed: seed, airy: airy);
         return SliverList.builder(
           itemCount: blocks.length,
-          itemBuilder: (context, i) => CollageBlockView(block: blocks[i], items: items, interaction: interaction),
+          itemBuilder: (context, i) => Padding(
+            padding: EdgeInsets.only(bottom: i == blocks.length - 1 ? 0 : bandSpacing),
+            child: CollageBlockView(block: blocks[i], items: items, interaction: interaction, gap: gap),
+          ),
         );
       }
 
@@ -541,25 +746,24 @@ class _DaySliver extends StatelessWidget {
         for (final (index, block) in day.blocks.indexed)
           switch (block) {
             LooseRun() => SliverPadding(
-                padding: EdgeInsets.symmetric(horizontal: loosePad, vertical: 4),
+                padding: EdgeInsets.symmetric(horizontal: loosePad, vertical: airy ? 6 : 4),
                 sliver: collageRows(block.items, cross - 2 * loosePad, daySeed ^ (index * 7919)),
               ),
             MomentBlock() => SliverPadding(
-                padding: EdgeInsets.fromLTRB(cardMargin, 10, cardMargin, 10),
+                padding: EdgeInsets.fromLTRB(cardMargin, airy ? 18 : 10, cardMargin, airy ? 18 : 10),
                 sliver: DecoratedSliver(
                   decoration: BoxDecoration(
                     color: style.momentTint(block.photos),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: style.scheme.outlineVariant.withValues(alpha: 0.5)),
+                    borderRadius: BorderRadius.circular(22),
                   ),
                   sliver: SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(cardInner, 0, cardInner, cardInner + 2),
+                    padding: EdgeInsets.fromLTRB(cardInner, 0, cardInner, cardInner + 2),
                     sliver: SliverMainAxisGroup(slivers: [
                       SliverToBoxAdapter(
                         child: _MomentHeader(
                           block: block,
-                          onEdit: () => onEditMoment(block.moment),
-                          onDissolve: () => onDissolveMoment(block.moment),
+                          onTap: () => onMomentActions(block.moment),
+                          onWriteStory: () => onWriteStory(block.moment),
                         ),
                       ),
                       collageRows(block.items, cross - 2 * (cardMargin + cardInner), _stableHash(block.moment.id)),
@@ -585,115 +789,140 @@ class _DayHeader extends StatelessWidget {
     final t = Theme.of(context);
     final s = t.colorScheme;
     final note = event.dayNotes[day.key];
+    final place = event.dayPlaces[day.key];
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 28, 0, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+      padding: const EdgeInsets.fromLTRB(0, 30, 0, 8),
+      child: InkWell(
+        onTap: onEditNote,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 'Day $dayNumber',
                 style: t.textTheme.headlineMedium?.copyWith(color: s.primary, fontWeight: FontWeight.w800, letterSpacing: -0.5),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    DateFormat('EEEE, d MMMM y').format(day.date),
-                    style: t.textTheme.titleSmall?.copyWith(color: s.onSurfaceVariant),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+              Text(
+                [DateFormat('EEEE, d MMMM').format(day.date), ?place].join('  ·  '),
+                style: t.textTheme.titleSmall?.copyWith(color: s.onSurfaceVariant),
+              ),
+              if (note != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10, right: 12),
+                  child: Text(note, style: t.textTheme.bodyLarge?.copyWith(fontStyle: FontStyle.italic, height: 1.5)),
                 ),
-              ),
-              IconButton(
-                tooltip: note == null ? 'Add a note' : 'Edit note',
-                onPressed: onEditNote,
-                icon: Icon(note == null ? Icons.edit_note : Icons.edit_outlined, color: s.onSurfaceVariant),
-              ),
             ],
           ),
-          if (note != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 4, right: 12),
-              child: InkWell(
-                onTap: onEditNote,
-                child: Container(
-                  padding: const EdgeInsets.only(left: 12),
-                  decoration: BoxDecoration(border: Border(left: BorderSide(color: s.primary, width: 3))),
-                  child: Text(note, style: t.textTheme.bodyLarge?.copyWith(fontStyle: FontStyle.italic, height: 1.45)),
-                ),
-              ),
-            ),
-        ],
+        ),
       ),
     );
   }
 }
 
 class _MomentHeader extends StatelessWidget {
-  const _MomentHeader({required this.block, required this.onEdit, required this.onDissolve});
+  const _MomentHeader({required this.block, required this.onTap, required this.onWriteStory});
   final MomentBlock block;
-  final VoidCallback onEdit;
-  final VoidCallback onDissolve;
+  final VoidCallback onTap;
+  final VoidCallback onWriteStory;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     final s = t.colorScheme;
+    final repo = AlbumScope.of(context);
     final photos = block.photos;
+    final m = block.moment;
     final hm = DateFormat('HH:mm');
     final first = photos.first.takenAt, last = photos.last.takenAt;
+    final multiDay = dayKey(first) != dayKey(last);
     final time = [
-      if (dayKey(first) != dayKey(last)) DateFormat('d MMM, HH:mm').format(first) else hm.format(first),
-      if (last.difference(first).inMinutes >= 1) (dayKey(first) != dayKey(last) ? DateFormat('d MMM, HH:mm') : hm).format(last),
+      (multiDay ? DateFormat('d MMM, HH:mm') : hm).format(first),
+      if (last.difference(first).inMinutes >= 1) (multiDay ? DateFormat('d MMM, HH:mm') : hm).format(last),
     ].join(' – ');
-    final m = block.moment;
+    final loading = repo.storyLoading.contains(m.id);
+    final offerStory = m.place != null && m.story == null && !loading && repo.settings.canWriteStories;
 
     return InkWell(
-      onTap: onEdit,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      onTap: onTap,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 14, 0, 10),
+        padding: const EdgeInsets.fromLTRB(8, 16, 8, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(Icons.bookmark, size: 20, color: s.primary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(m.title, style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700, height: 1.15)),
-                      Text(
-                        '$time · ${photos.length} photo${photos.length == 1 ? '' : 's'}',
-                        style: t.textTheme.bodySmall?.copyWith(color: s.onSurfaceVariant),
-                      ),
-                    ],
-                  ),
-                ),
-                PopupMenuButton<String>(
-                  icon: Icon(Icons.more_horiz, color: s.onSurfaceVariant),
-                  onSelected: (v) => v == 'edit' ? onEdit() : onDissolve(),
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit moment'))),
-                    PopupMenuItem(
-                      value: 'dissolve',
-                      child: ListTile(leading: Icon(Icons.bookmark_remove_outlined), title: Text('Dissolve (keep photos)')),
-                    ),
-                  ],
-                ),
-              ],
+            Text(m.title, style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700, height: 1.15)),
+            const SizedBox(height: 2),
+            Text(
+              [time, if (m.place != null) m.place!.name].join('  ·  '),
+              style: t.textTheme.bodySmall?.copyWith(color: s.onSurfaceVariant),
             ),
             if (m.note.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(28, 6, 12, 0),
-                child: Text(m.note, style: t.textTheme.bodyMedium?.copyWith(height: 1.45)),
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(m.note, style: t.textTheme.bodyMedium?.copyWith(height: 1.5)),
               ),
+            if (loading)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Row(children: [
+                  const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                  const SizedBox(width: 10),
+                  Text('Looking into ${m.place!.name}…', style: t.textTheme.bodySmall?.copyWith(color: s.onSurfaceVariant)),
+                ]),
+              )
+            else if (m.story != null)
+              _StoryText(story: m.story!)
+            else if (offerStory)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact),
+                  onPressed: onWriteStory,
+                  icon: const Icon(Icons.auto_awesome_outlined, size: 16),
+                  label: Text('About ${m.place!.name}'),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The AI-written place description: set apart as quiet "flavour text".
+class _StoryText extends StatelessWidget {
+  const _StoryText({required this.story});
+  final PlaceStory story;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final s = t.colorScheme;
+    final domains = story.sources
+        .map((u) => Uri.tryParse(u)?.host.replaceFirst(RegExp(r'^www\.'), ''))
+        .nonNulls
+        .toSet()
+        .take(2)
+        .toList();
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Container(
+        padding: const EdgeInsets.only(left: 12),
+        decoration: BoxDecoration(border: Border(left: BorderSide(color: s.primary.withValues(alpha: 0.5), width: 2))),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              story.text,
+              style: t.textTheme.bodyMedium?.copyWith(fontStyle: FontStyle.italic, height: 1.5, color: s.onSurface.withValues(alpha: 0.85)),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              ['AI-written', if (domains.isNotEmpty) 'from ${domains.join(', ')}'].join(' '),
+              style: t.textTheme.labelSmall?.copyWith(color: s.onSurfaceVariant.withValues(alpha: 0.8)),
+            ),
           ],
         ),
       ),
@@ -751,6 +980,10 @@ class _SelectionBar extends StatelessWidget {
                       const PopupMenuItem(value: 'caption', child: ListTile(leading: Icon(Icons.short_text), title: Text('Caption'))),
                     if (single)
                       const PopupMenuItem(value: 'cover', child: ListTile(leading: Icon(Icons.star_outline), title: Text('Use as album cover'))),
+                    const PopupMenuItem(
+                      value: 'location',
+                      child: ListTile(leading: Icon(Icons.add_location_alt_outlined), title: Text('Set location')),
+                    ),
                     if (anyStacked)
                       const PopupMenuItem(value: 'ungroup', child: ListTile(leading: Icon(Icons.burst_mode_outlined), title: Text('Ungroup carousel'))),
                     if (anyInMoment)

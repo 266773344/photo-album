@@ -5,6 +5,7 @@ import '../theme/event_theme.dart';
 import '../widgets/common.dart';
 import 'event_editor.dart';
 import 'event_screen.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -33,6 +34,14 @@ class HomeScreen extends StatelessWidget {
           SliverAppBar.large(
             title: const Text('My Albums', style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -0.5)),
             backgroundColor: scheme.surface,
+            actions: [
+              IconButton(
+                tooltip: 'Settings',
+                icon: const Icon(Icons.settings_outlined),
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen())),
+              ),
+              const SizedBox(width: 4),
+            ],
           ),
           if (!repo.loaded)
             const SliverFillRemaining(child: Center(child: CircularProgressIndicator()))
